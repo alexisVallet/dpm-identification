@@ -3,7 +3,7 @@
 import numpy as np
 
 class DPM:
-    def __init__(self, root, parts, anchors, deform):
+    def __init__(self, root, parts, anchors, deforms, bias):
         """ Initializes a deformable parts model with a root filter and a set of part
             filters with relative anchor positions.
         
@@ -15,13 +15,16 @@ class DPM:
             anchors list of k anchor positions for each part, as 2d (x,y) numpy arrays
                     corresponding to placement relative to the root filter in the lower
                     layer of the pyramid.
+            deforms list of k 4d vectors containing deformation coefficients.
+            bias    bias of the dpm in a mixture model.
         """
         assert len(parts) == len(anchors)
-        assert len(parts) == len(deform)
+        assert len(parts) == len(deforms)
         self.root = root
         self.parts = parts
         self.anchors = anchors
-        self.deform = deform
+        self.deforms = deforms
+        self.bias = bias
 
 class Mixture:
     def __init__(self, dpms):

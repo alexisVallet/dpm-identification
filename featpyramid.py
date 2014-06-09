@@ -24,7 +24,7 @@ def computefeaturemap(image, mindimdiv, feature, featdim):
     n = mindimdiv
     m = int(round(height * n / width))
     jstep = width / n
-    istep = height / n
+    istep = height / m
     
     featuremap = np.empty([m, n, featdim])
 
