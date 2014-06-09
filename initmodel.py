@@ -29,7 +29,7 @@ def initialize_roots(trainingimages, feature):
     Return:
         array of roots represented by feature maps.
     """
-    # Warp (resize) all examples to the average aspect ratio across all images, compute
-    # feature maps for each of them.
+    # Warp (resize) all examples to the average aspect ratio across all 
+    # images, compute feature maps for each of them.
     meanar = mean_aspect_ratio(trainingimages)
     
