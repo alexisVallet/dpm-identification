@@ -90,7 +90,8 @@ def dpm_response(pyramid, dpmmodel):
     return scoremap
 
 def identify(pyramid, model):
-    """ Returns the score of a mixture of dpms on a feature pyramid.
+    """ Returns the score of a mixture of dpms on a feature pyramid, and
+        optionally the information about the corresponding object hypothesis.
 
     Arguments:
         pyramid    pyramid to match the model on.
