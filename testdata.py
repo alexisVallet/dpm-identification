@@ -19,9 +19,10 @@ def randomdpm(pyramid, nbparts):
     deforms = []
 
     for i in range(0,nbparts):
-        partrows, partcols = (npr.randint(1,rootrows), npr.randint(1,rootcols))
-        puli, pulj = (npr.randint(0,rootrows - partrows),
-                      npr.randint(0,rootcols - partcols))
+        partrows = npr.randint(1,max(2,rootrows))
+        partcols = npr.randint(1,max(2,rootcols))
+        puli, pulj = (npr.randint(0,max(1, rootrows - partrows)),
+                      npr.randint(0,max(1, rootcols - partcols)))
         # convert all these relative coords to the right scale and displacement
         puli = (ruli + puli) * 2
         pulj = (rulj + pulj) * 2
@@ -31,9 +32,9 @@ def randomdpm(pyramid, nbparts):
         anchors.append(np.array([pulj,puli]))
         # random deformations
         deforms.append(np.absolute(npr.rand(4)))
-    return DPM(root, parts, anchors, deforms, npr.random())
+    return dpm.DPM(root, parts, anchors, deforms, npr.random())
 
 def randommixture(pyramid):
     """ Generate a random mixture model from a feature pyramid.
     """
-    return map(lambda i: randomdpm(pyramid, randint(0,5)), range(0,npr.randint(0,5)))
+    return dpm.Mixture(map(lambda i: randomdpm(pyramid, npr.randint(0,5)), range(0,npr.randint(0,5))))

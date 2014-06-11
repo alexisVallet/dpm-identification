@@ -24,4 +24,10 @@ class TestDPM(unittest.TestCase):
             mixture = testdata.randommixture(pyramid)
             vector = mixture.tovector()
             size = mixture.size()
-            nmixture = 
+            nmixture = dpm.vectortomixture(vector, size)
+            nvector = nmixture.tovector()
+            self.assertEqual(mixture, nmixture)
+            self.assertTrue(np.array_equal(vector, nvector))
+
+if __name__ == "__main__":
+    unittest.main()
