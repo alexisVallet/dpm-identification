@@ -7,10 +7,12 @@ import identify as idt
 import dpm
 import featpyramid as pyr
 
-def bestlatvec(beta, pyramid):
-    """ Compute the best latent vector (the one corresponding to the best object
-        hypothesis) for a model by matching it against a pyramid.
+def bestlatvec(model, pyramid):
+    """ Compute the best latent vector (the one corresponding to the highest 
+        scoring object hypothesis) for a model by matching it against a specific 
+        pyramid.
     """
+        
 
 def lsvmsgd(model, poslatents, negatives, C):
     """ Latent svm stochastic gradient descent for optimizing the model
@@ -25,23 +27,34 @@ def lsvmsgd(model, poslatents, negatives, C):
         C          soft-margin parameter for the SVM.
     """
     previousbeta = None
-    currentmodel = model
     currentbeta = model.tovector()
+    modelsize = model.size()
     nbpos = poslatents.shape[1]
     nbneg = len(negatives)
     nbexamples = nbpos + nbneg
     t = 1
+    gradient = None
     
-    while previousbeta == None or not np.allclose(currentbeta, previousbeta):
+    # Stop when the gradient is too small
+    while gradient == None or np.linalg.norm(gradient) >= 10E-8  :
         # set the learning rate
         alpha = 1 / t
         # choose a random example
         i = np.random.randint(0, nbexamples)
+        # check whether it is positive or negative
+        yi = 1 if i < nbpos else -1
         # If it is positive, pick the pre-set latent vector. It negative,
         # run the matching algorithm to find the best latent vector.
-        latvec = poslatents[:,i] if i < nbpos else bestlatvec(currentbeta,
-                                                              negatives[i-nbpos])
-        
+        latvec = poslatents[:,i] if yi > 0 else bestlatvec(vectortomixture(currentbeta.
+                                                                           modelsize),
+                                                           negatives[i-nbpos])
+        # Compute the gradient from the sample, update beta and the model
+        gradient = (currentbeta if yi * (currentbeta.vdot(latvec)) >= 1 
+                    else (beta - C * nbexamples * yi * latvec))
+        previousbeta = np.copy(currentbeta)
+        currentbeta = currentbeta - alpha * gradient
+
+    return currentmodel
 
 def train(initmodel, positives, negatives):
     """ Trains a mixture of deformable part models using a latent SVM.
