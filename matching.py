@@ -71,9 +71,13 @@ def dpm_matching(pyramid, dpmmodel):
     partresponses = map(lambda part: 
                         filter_response(pyramid.features[0], part),
                         dpmmodel.parts)
-    # Apply distance transform to part responses
+    # Apply distance transform to part responses.
+    # The reason we do -gdt(d, -r) is because the gdt actually computes
+    # an (arg)max while we want an (arg)min. A tiny bit of maths shows
+    # that inverting the signs this way expresses the score function as
+    # a valid generalized distance transform.
     gdtpartresp = map(lambda partresp:
-                      gdt.distancetransform(dpmmodel.deforms, partresp),
+                      -gdt.gdt2d(dpmmodel.deforms, -partresp),
                       partresponses)
     # Resize and shift the part maps by the relative anchor position
     shiftedparts = []
@@ -97,3 +101,7 @@ def dpm_matching(pyramid, dpmmodel):
 def mixture_matching(pyramid, mixture):
     """ Matches a mixture model
     """
+    # First compute individual component matchings
+    for comp in mixture.dpms:
+        score, rootpos, partresponses = dpm_matching(pyramid, comp)
+        
