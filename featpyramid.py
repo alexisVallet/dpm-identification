@@ -19,7 +19,7 @@ def computefeaturemap(image, mindimdiv, feature, featdim):
     if rotated:
         image = np.transpose(image, (1,0,2))
         height, width = width, height
-        
+
     # Compute the number of division for the height
     n = mindimdiv
     m = int(round(height * n / width))
@@ -30,9 +30,12 @@ def computefeaturemap(image, mindimdiv, feature, featdim):
 
     for i in range(0,m):
         for j in range(0,n):
-            # Determine the corresponding block
-            block = image[round(i*istep):round((i+1)*istep),
-                          round(j*jstep):round((j+1)*jstep)]
+            # ugly stuff to minimize rounding errors
+            starti = int(round(i * height / n)) if i > 0 else 0
+            startj = int(round(j * width / m)) if j > 0 else 0
+            endi = int(round((i + 1) * height / n)) if i < m - 1 else height -1
+            endj = int(round((j + 1) * width / m)) if j < n - 1 else width - 1
+            block = image[starti:endi,startj:endj]
             # Compute its feature
             featuremap[i,j,:] = feature(block)
     if rotated:
@@ -83,7 +86,7 @@ def colorhistogram(image, nbbins=(4,4,4), limits=((0,255),(0,255),(0,255))):
 
 """ Computes lab histogram of an image.
 """
-labhistogram = lambda img, nbbins: colorhistogram(img, nbbins, 
+labhistogram = lambda img, nbbins: colorhistogram(img, nbbins,
                                                   [0,101,-127, 128, -127, 128])
 
 if __name__ == "__main__":

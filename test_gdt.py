@@ -17,8 +17,7 @@ class TestGDT(unittest.TestCase):
             for j in range(0,cols):
                 i1, j1 = args[i,j]
                 argdt[i,j] = img[i1,j1] + (i1 - i)**2 + (j1 - j)**2
-        allclose = np.allclose(dfimg, argdt)
-        self.assertTrue(allclose)
+        np.testing.assert_almost_equal(dfimg, argdt)
 
 if __name__ == "__main__":
     unittest.main()

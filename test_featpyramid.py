@@ -12,7 +12,7 @@ class TestFeatPyramid(unittest.TestCase):
         img = cv2.imread('./data/images/source/asahina_mikuru_0.jpg')
         labimg = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         nbbins = (4,4,4)
-        pyramid = pyr.FeatPyramid(labimg, 
+        pyramid = pyr.FeatPyramid(labimg,
                                   lambda img: pyr.labhistogram(img, nbbins).flatten('C')
                                   ,64)
         fullhist = pyr.labhistogram(labimg, nbbins).flatten('C')
