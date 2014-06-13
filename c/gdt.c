@@ -1,5 +1,16 @@
 #include <float.h>
+#include <string.h>
 #include <stdio.h>
+
+static double eps = 10E-5;
+
+static float min(float f1, float f2) {
+  return f1 > f2 ? f2 : f1;
+}
+
+static float max(float f1, float f2) {
+  return f1 > f2 ? f1 : f2;
+}
 
 /**
  * Implementation of the generalized distance transform, generalized to
@@ -14,7 +25,7 @@
  * @param arg output indexes corresponding to the argmax version of the gdt. Should be
  *            allocated to n elements prior to call.
  */
-void gdt1D(float *d, float *f, int n, float *df, int *arg) {
+void gdt1D(float *d, float *f, int n, float *df, int *arg, int offset) {
   /*
    * Please refer to Felzenszwalb, Huttenlocher, 2004 for a detailed
    * pseudo code of the algorithm - which the code mirrors, except for
@@ -28,28 +39,27 @@ void gdt1D(float *d, float *f, int n, float *df, int *arg) {
   int q;
   int vk, fvk, fq;
   v[0] = 0;
-  z[0] = FLT_MIN;
+  z[0] = -FLT_MAX;
   z[1] = FLT_MAX;
   
   for (q = 1; q < n; q++) {
-    while (1) {
-      /* Intersection s generalized to arbitrary parabolas (d[1] nonnegative). 
-       * Follows from elementary algebra.
-       */
-      vk = v[k];
-      fvk = f[vk];
-      fq = f[q];
-      s = (d[0] * (vk - q) + d[1] * (q*q - vk*vk) + fq - fvk)
-	/ (2*d[1]*(q - v[k]));
-      if (s > z[k]) {
-	break;
-      }
+    /* Intersection s generalized to arbitrary parabolas (d[1] nonnegative). 
+     * Follows from elementary algebra.
+     */
+  inter: vk = v[k];
+    fvk = f[vk];
+    fq = f[q];
+    s = (d[0] * (vk - q) + d[1] * (q*q - vk*vk) + fq - fvk)
+      / (2*d[1]*(q - v[k]));
+    if (s <= z[k]) {
       k--;
+      goto inter;
+    } else {
+      k++;
+      v[k] = q;
+      z[k] = s;
+      z[k+1] = FLT_MAX;
     }
-    k++;
-    v[k] = q;
-    z[k] = s;
-    z[k+1] = FLT_MAX;
   }
 
   k = 0;
@@ -59,10 +69,12 @@ void gdt1D(float *d, float *f, int n, float *df, int *arg) {
     }
     /* Compared to the original paper, swapped in the new distance definition. */
     qmvk = q - v[k];
-    df[q] = d[0] * qmvk + d[1] * qmvk * qmvk + f[v[k]];
+    vk = v[k];
+    fvk = f[vk];
+    df[q] = d[0] * qmvk + d[1] * qmvk * qmvk + fvk;
     /* Store the index of the actual max in the arg vector. Necessary for efficient
      * displacement lookup in the DPM matching algorithm. */
-    arg[q] = v[k];
+    arg[q] = offset + v[k];
   }
 }
 
@@ -87,13 +99,13 @@ static void fromColMajor(int flat, int *i, int *j, int rows) {
 /**
  * Matrix transpose code from http://stackoverflow.com/questions/16737298/what-is-the-fastest-way-to-transpose-a-matrix-in-c .
  */
-void tran(float *src, float *dst, const int N, const int M) {
+void tran(void *src, void *dst, const int N, const int M, size_t coeffsize) {
   int n, i, j;
 
   for(n = 0; n<N*M; n++) {
     i = n/N;
     j = n%N;
-    dst[n] = src[M*j + i];
+    memcpy(dst + n * coeffsize, src + (M * j + i) * coeffsize, coeffsize);
   }
 }
 
@@ -111,7 +123,7 @@ void tran(float *src, float *dst, const int N, const int M) {
  * @param argj output column indexes for the argmax version of the problem. rows*cols
  *             row-major matrix.
  */
-void gdt2D(float *d, float *f, int rows, int cols, 
+void gdt2D(float *d, float *f, int rows, int cols,
 	   float *df, int *argi, int *argj) {
   // apply the 1D algorithm on each row
   int i;
@@ -120,37 +132,45 @@ void gdt2D(float *d, float *f, int rows, int cols,
   float dy[2] = {d[1], d[3]};
   int offset;
   float df2[rows * cols];
+  float df3[rows * cols];
+  int flatarg1[rows * cols];
+  int flatarg2[rows * cols];
   int tmpi, tmpj;
+  int flatidx1, flatidx2;
+  int outIdx;
 
-  printf("Computing on rows...\n");
   for (i = 0; i < rows; i++) {
     offset = toRowMajor(i,0,cols);
-    //    printf("offset=%d, total size=%d\n", offset, rows * cols);
-    gdt1D(dy, f + offset, cols, df + offset, argi + offset);
+    gdt1D(dy, f + offset, cols, df + offset, flatarg1 + offset, offset);
   }
 
-  printf("Transposing...\n");
   // then on each column of the result. For this we transpose it, for memory locality.
-  tran(df, df2, rows, cols);
+  tran(df, df2, rows, cols, sizeof(float));
   
-  printf("Computing on columns...\n");
   for (i = 0; i < cols; i++) {
-    offset = toColMajor(0, i, rows);
-    gdt1D(dx, df2 + offset, rows, df2 + offset, argj + offset);
+    offset = toRowMajor(i, 0, rows);
+    gdt1D(dx, df2 + offset, rows, df3 + offset, flatarg2 + offset, offset);
   }
 
-  printf("Transposing again...\n");
   // transpose the result again
-  tran(df2, df, cols, rows);
+  tran(df3, df, cols, rows, sizeof(float));
 
-  printf("Computing indices...\n");
-  // compute the indices for the arg arrays
+  /* Compute 2D indexes of max, using the flat indexes of each pass.
+   *
+   * flatarg2 is a row-major cols*rows matrix. flatarg2[j,i] is flat index
+   * into a row-major cols*rows matrix. Therefore we have to swap the resulting
+   * indexes.
+   * 
+   * flatarg1 can be thought of as a row major rows*cols matrix
+   * containing (i,j) row major indexes into f.
+   */
   for (i = 0; i < rows; i++) {
     for (j = 0; j < cols; j++) {
-      fromRowMajor(argj[toRowMajor(i,j,cols)], &tmpi, &tmpj, cols);
-      fromColMajor(argi[toColMajor(tmpi,tmpj,rows)], &tmpi, &tmpj, rows);
-      argi[toRowMajor(i,j,cols)] = tmpi;
-      argj[toRowMajor(i,j,cols)] = tmpj;
+      flatidx1 = flatarg2[toRowMajor(j,i,rows)];
+      fromRowMajor(flatidx1, &tmpj, &tmpi, rows);
+      flatidx2 = flatarg1[toRowMajor(tmpi, tmpj, cols)];
+      outIdx = toRowMajor(i,j,cols);
+      fromRowMajor(flatidx2, &argi[outIdx], &argj[outIdx], cols);
     }
   }
 }
