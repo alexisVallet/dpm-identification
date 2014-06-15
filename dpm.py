@@ -4,18 +4,19 @@ import numpy as np
 
 class DPM:
     def __init__(self, root, parts, anchors, deforms, bias):
-        """ Initializes a deformable parts model with a root filter and a set of part
-            filters with relative anchor positions.
+        """ Initializes a deformable parts model with a root filter and a 
+            set of part filters with relative anchor positions.
         
         Argument:
-            root    n by m by featdim numpy array for the root filter, n and m any
-                    naturals.
-            parts   list of k n_i by m_i by featdim numpy arrays for the parts filters,
-                    n_i and m_i possibly varying for each.
-            anchors list of k anchor positions for each part, as 2d (x,y) numpy arrays
-                    corresponding to placement relative to the root filter in the lower
-                    layer of the pyramid.
-            deforms list of k 4d vectors containing deformation coefficients.
+            root    n by m by featdim numpy array for the root filter, n 
+                    and m any naturals.
+            parts   list of k n_i by m_i by featdim numpy arrays for the 
+                    parts filters, n_i and m_i possibly varying for each.
+            anchors list of k anchor positions for each part, as 2d (x,y) 
+                    numpy arrays corresponding to placement relative to 
+                    the root filter in the lower layer of the pyramid.
+            deforms list of k 4d vectors containing deformation 
+                    coefficients.
             bias    bias of the dpm in a mixture model.
         """
         assert len(parts) == len(anchors)
@@ -45,7 +46,8 @@ class DPM:
 
     def size(self):
         """ Returns a DPMSize object describing the size of the DPM object,
-            i.e. the information which should be unchanged by training the model.
+            i.e. the information which should be unchanged by training the
+            model.
         """
         return DPMSize(self.root.shape, map(lambda part: part.shape, self.parts),
                        self.anchors)
@@ -86,8 +88,8 @@ class Mixture:
         self.dpms = dpms
 
     def size(self):
-        """ Returns the size of the model, i.e. the information unchanged by
-            training the model.
+        """ Returns the size of the model, i.e. the information unchanged 
+            by training the model.
 
         Return:
             A MixtureSize object describing the size of this mixture.
@@ -112,8 +114,8 @@ class Mixture:
         return repr(self.size())
 
 class MixtureSize:
-    """ Describes the information of a mixture model that is unchanged by training,
-        namely the size and number of each component.
+    """ Describes the information of a mixture model that is unchanged by 
+        training, namely the size and number of each component.
     """
     def __init__(self, dpmsizes):
         self.dpmsizes = dpmsizes
