@@ -2,7 +2,7 @@
 """
 import cv2
 import numpy as np
-import scipy.ndimage.filters as filters
+import skimage.feature as skifeat
 import gdt
 import dpm
 import featpyramid as fpyr
@@ -48,7 +48,17 @@ def filter_response(featmap, linfilter):
     Return:
         A 2D response map of the same size as featmap.
     """
-    return np.sum(filters.correlate(featmap, linfilter), axis=2)
+    # pad with zeroes
+    frows, fcols = featmap.shape[0:2]
+    lrows, lcols = linfilter.shape[0:2]
+    hrows, hcols = (lrows//2, lcols//2)
+    padded = np.zeros([frows + lrows - 1, fcols + lcols - 1, featmap.shape[2]], 
+                      dtype=np.float32)
+    padded[hrows:hrows+frows,hcols:hcols+fcols] = featmap
+
+    return cv2.matchTemplate(padded, 
+                             linfilter.astype(np.float32), 
+                             cv2.TM_CCORR)
 
 def dpm_matching(pyramid, dpmmodel):
     """ Computes the matching of a DPM (non mixture nodel) on a
@@ -68,6 +78,10 @@ def dpm_matching(pyramid, dpmmodel):
     # by cross correlation. The root filter is correlated to the low
     # resolution layer, and the parts to the high resolution one.
     rootresponse = filter_response(pyramid.features[1], dpmmodel.root)
+    cv2.namedWindow("root response", cv2.WINDOW_NORMAL)
+    cv2.imshow("root response", 
+               (rootresponse - rootresponse.min()) / (rootresponse.max() - rootresponse.min()))
+    cv2.waitKey(0)
     partresponses = map(lambda part: 
                         filter_response(pyramid.features[0], part),
                         dpmmodel.parts)
@@ -76,14 +90,17 @@ def dpm_matching(pyramid, dpmmodel):
     # an (arg)max while we want an (arg)min. A tiny bit of maths shows
     # that inverting the signs this way expresses the score function as
     # a valid generalized distance transform.
-    gdtpartresp = map(lambda partresp:
-                      -gdt.gdt2d(dpmmodel.deforms, -partresp)[0],
-                      partresponses)
+    gdtpartresp = []
+
+    for i in range(0, len(dpmmodel.parts)):
+        partresp = partresponses[i]
+        (df,args) = gdt.gdt2D(dpmmodel.deforms[i], -partresp)
+        gdtpartresp.append(-df) 
     # Resize and shift the part maps by the relative anchor position
     shiftedparts = []
     
     for i in range(0,len(dpmmodel.parts)):
-        resized = cv2.resize(gdtpartresp, tuple(rootresponse.shape),
+        resized = cv2.resize(gdtpartresp[i], tuple(rootresponse.shape[::-1]),
                              interpolation=cv2.INTER_NEAREST)
         shiftedparts.append(shift(resized,
                                   np.round_(-dpmmodel.anchors[i]/2).astype(np.int32)))
@@ -94,9 +111,9 @@ def dpm_matching(pyramid, dpmmodel):
 
     # Compute the score as the maximum value in the score map, and the root position
     # as the position of this maximum.
-    rootpos = scoremap.argmax()
+    ri, rj = np.unravel_index(scoremap.argmax(), scoremap.shape)
     
-    return (scoremap[rootpos], rootpos, partresponses)
+    return (scoremap[ri, rj], (rj, ri), partresponses)
 
 def mixture_matching(pyramid, mixture):
     """ Matches a mixture model against a feature pyramid.
@@ -122,7 +139,7 @@ def mixture_matching(pyramid, mixture):
     # initialize at root filter size + deformations + bias
     latvecsize = comp.root.size + 4 * (len(comp.parts) + 1) + 1
 
-    for i in range(0, len(comp.parts))
+    for i in range(0, len(comp.parts)):
         (partgdt, args) = gdt2D(comp.deforms[i], -partresponses[i])
         ancj, anci = np.round(2*rootpos + comp.anchors[i]).astype(np.int32)
         absolutepos.append(args[anci, ancj])

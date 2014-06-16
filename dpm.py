@@ -1,6 +1,7 @@
 """ Deformable parts model implementation.
 """
 import numpy as np
+import cv2
 
 class DPM:
     def __init__(self, root, parts, anchors, deforms, bias):
@@ -65,6 +66,61 @@ class DPM:
 
     def __repr__(self):
         return repr(self.size())
+
+    def visualize(self, featvizualisation):
+        """ Visualizes a deformable part models into a images.
+        
+        Arguments:
+            featfizualisation function taking a pyramid feature as argument,
+            and returns an image representing the feature visually. Will be
+            resized to an appropriate block into the final representation.
+
+        Returns:
+            BGR images representing the model visually.
+        """
+        partblock = (8,8)
+        # root filter
+        rrows, rcols = self.root.shape[0:2]
+        rootimage = np.empty([partblock[0] * 2 * rrows, partblock[1] * 2 * rcols, 3], 
+                             dtype=np.uint8)
+        
+        for i in range(0,rrows):
+            for j in range(0,rcols):
+                viz = featvizualisation(self.root[i,j])
+                uli = i*partblock[0]*2
+                ulj = j*partblock[1]*2
+                rootimage[uli:uli+partblock[0]*2,ulj:ulj+partblock[1]*2] = (
+                    cv2.resize(viz, (partblock[0]*2,partblock[1]*2))
+                )
+
+        # part filter
+        prows, pcols = [rrows * 2, rcols *2]
+        partsimage = np.zeros([partblock[0] * prows, partblock[1] * pcols, 3],
+                              dtype=np.int8)
+        
+        # draw each part one by one
+        for p in range(0, len(self.parts)):
+            part = self.parts[p]
+            anchor = np.round(self.anchors[p]).astype(np.int8)
+            deform = self.deforms[p]
+            partimage = np.empty([partblock[0] * part.shape[0],
+                                  partblock[1] * part.shape[1],
+                                  3], dtype=np.int8)
+            for i in range(0,part.shape[0]):
+                for j in range(0,part.shape[1]):
+                    uli, ulj = [partblock[0]*i, partblock[1]*j]
+                    subwindow = partimage[uli:uli+partblock[0],
+                                          ulj:ulj+partblock[1]]
+                    subwindow = (
+                        cv2.resize(featvizualisation(part[i,j]), 
+                                   tuple(subwindow.shape[0:2]))
+                    )
+            subwindow = partsimage[anchor[1]:anchor[1] + partimage.shape[0],
+                                   anchor[0]:anchor[0] + partimage.shape[1]]
+            subwindow = partimage[0:subwindow.shape[0],0:subwindow.shape[1]]
+        
+        return (rootimage, partsimage)
+                    
 
 class DPMSize:
     """ Class describing the information of a DPM which are unchanged by
