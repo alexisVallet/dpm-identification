@@ -6,13 +6,7 @@ import sklearn as skl
 import identify as idt
 import dpm
 import featpyramid as pyr
-
-def bestlatvec(model, pyramid):
-    """ Compute the best latent vector (the one corresponding to the highest 
-        scoring object hypothesis) for a model by matching it against a specific 
-        pyramid.
-    """
-        
+import matching
 
 def lsvmsgd(model, poslatents, negatives, C):
     """ Latent svm stochastic gradient descent for optimizing the model
@@ -45,9 +39,11 @@ def lsvmsgd(model, poslatents, negatives, C):
         yi = 1 if i < nbpos else -1
         # If it is positive, pick the pre-set latent vector. It negative,
         # run the matching algorithm to find the best latent vector.
-        latvec = poslatents[:,i] if yi > 0 else bestlatvec(vectortomixture(currentbeta.
-                                                                           modelsize),
-                                                           negatives[i-nbpos])
+        latvec = None
+        if yi > 0:
+            latvec = poslatents[:,i]
+        else:
+            
         # Compute the gradient from the sample, update beta and the model
         gradient = (currentbeta if yi * (currentbeta.vdot(latvec)) >= 1 
                     else (beta - C * nbexamples * yi * latvec))

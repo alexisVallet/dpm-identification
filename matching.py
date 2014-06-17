@@ -78,10 +78,6 @@ def dpm_matching(pyramid, dpmmodel):
     # by cross correlation. The root filter is correlated to the low
     # resolution layer, and the parts to the high resolution one.
     rootresponse = filter_response(pyramid.features[1], dpmmodel.root)
-    cv2.namedWindow("root response", cv2.WINDOW_NORMAL)
-    cv2.imshow("root response", 
-               (rootresponse - rootresponse.min()) / (rootresponse.max() - rootresponse.min()))
-    cv2.waitKey(0)
     partresponses = map(lambda part: 
                         filter_response(pyramid.features[0], part),
                         dpmmodel.parts)
@@ -104,8 +100,10 @@ def dpm_matching(pyramid, dpmmodel):
                              interpolation=cv2.INTER_NEAREST)
         shiftedparts.append(shift(resized,
                                   np.round_(-dpmmodel.anchors[i]/2).astype(np.int32)))
+
     # Sum it all along with bias value
     scoremap = dpmmodel.bias + rootresponse
+
     for part in shiftedparts:
         scoremap = scoremap + part
 
@@ -113,13 +111,20 @@ def dpm_matching(pyramid, dpmmodel):
     # as the position of this maximum.
     ri, rj = np.unravel_index(scoremap.argmax(), scoremap.shape)
     
-    return (scoremap[ri, rj], (rj, ri), partresponses)
+    return (scoremap[ri, rj], np.array((rj, ri), np.int32), partresponses)
 
 def mixture_matching(pyramid, mixture):
-    """ Matches a mixture model against a feature pyramid.
+    """ Matches a mixture model against a feature pyramid, and computes
+        the latent vector corresponding to the best object hypothesis.
     
     Arguments:
-        
+        pyramid    pyramid to match the model on
+        mixture    model to match on the pyramid
+    Returns:
+        (score, c, latvec) where:
+        - score is the score of the best component
+        - c is the index of the component in the mixture
+        - latvec is the latent vector of the best object hypothesis for c
     """
     bestcomp = None
 
@@ -140,8 +145,11 @@ def mixture_matching(pyramid, mixture):
     latvecsize = comp.root.size + 4 * (len(comp.parts) + 1) + 1
 
     for i in range(0, len(comp.parts)):
-        (partgdt, args) = gdt2D(comp.deforms[i], -partresponses[i])
+        (partgdt, args) = gdt.gdt2D(comp.deforms[i], -partresponses[i])
         ancj, anci = np.round(2*rootpos + comp.anchors[i]).astype(np.int32)
+        print repr((anci,ancj))
+        print repr(2*rootpos)
+        print repr(comp.anchors[i])
         absolutepos.append(args[anci, ancj])
         displacements.append(args[anci, ancj] - 
                              np.array([anci,ancj], dtype=np.int32))
