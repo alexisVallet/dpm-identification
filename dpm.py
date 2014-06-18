@@ -22,6 +22,7 @@ class DPM:
         """
         assert len(parts) == len(anchors)
         assert len(parts) == len(deforms)
+
         self.root = root
         self.parts = parts
         self.anchors = anchors

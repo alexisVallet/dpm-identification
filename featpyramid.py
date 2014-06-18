@@ -66,31 +66,6 @@ class FeatPyramid:
                                                           interpolation=cv2.INTER_CUBIC)
                                                ,mindimdiv, feature, featdim))
 
-def colorhistogram(image, nbbins=(4,4,4), limits=(0,255,0,255,0,255)):
-    """ Compute a color histogram of an image in a numpy array.
-    
-    Arguments:
-        image    color image to compute the color histogram from.
-        nbbins   tuple with nbchannels elements specifying bins to use for each channel.
-                 Defines the shape of the output histogram, for a total of prod(nbbins)
-                 bins.
-        limits   tuple with nbchannels elements specifying bounds for color values for
-                 each channel. Each element is a pair (minval, maxval) where minval
-                 is the lowest possible value (inclusive) and maxval is the highest
-                 possible (exclusive).
-
-    Returns:
-        An nbbins shaped numpy array containing the color histogram of the input image.
-    """
-    nbchannels = image.shape[2]
-
-    return cv2.calcHist([image], range(0, nbchannels), None, nbbins, limits)
-
-""" Computes lab histogram of an image.
-"""
-labhistogram = lambda img, nbbins: colorhistogram(img, nbbins,
-                                                  [0,101,-127, 128, -127, 128])
-
 if __name__ == "__main__":
     img = cv2.imread(sys.argv[1])
     labimg = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
