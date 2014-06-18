@@ -110,8 +110,13 @@ def dpm_matching(pyramid, dpmmodel):
     # Compute the score as the maximum value in the score map, and the root position
     # as the position of this maximum.
     ri, rj = np.unravel_index(scoremap.argmax(), scoremap.shape)
+    # Since we match the template by moving its center along the image, and
+    # we expect the position of the top left corner in the rest of the code,
+    # we need to convert it back
+    rootpos = np.array((rj - (dpmmodel.root.shape[1] // 2), 
+                        ri - (dpmmodel.root.shape[0] // 2)), np.int32)
     
-    return (scoremap[ri, rj], np.array((rj, ri), np.int32), partresponses)
+    return (scoremap[ri, rj], rootpos, partresponses)
 
 def mixture_matching(pyramid, mixture):
     """ Matches a mixture model against a feature pyramid, and computes
@@ -142,14 +147,13 @@ def mixture_matching(pyramid, mixture):
     displacements = []
     score, comp, rootpos, partesponses, c = bestcomp
     # initialize at root filter size + deformations + bias
-    latvecsize = comp.root.size + 4 * (len(comp.parts) + 1) + 1
+    latvecsize = comp.root.size + 4 * (len(comp.parts)) + 1
 
     for i in range(0, len(comp.parts)):
         (partgdt, args) = gdt.gdt2D(comp.deforms[i], -partresponses[i])
         ancj, anci = np.round(2*rootpos + comp.anchors[i]).astype(np.int32)
-        print repr((anci,ancj))
-        print repr(2*rootpos)
-        print repr(comp.anchors[i])
+        print args.shape
+        print repr((anci, ancj))
         absolutepos.append(args[anci, ancj])
         displacements.append(args[anci, ancj] - 
                              np.array([anci,ancj], dtype=np.int32))
@@ -163,8 +167,8 @@ def mixture_matching(pyramid, mixture):
     # root filter
     rrows, rcols = comp.root.shape[0:2]
     latvec[0:comp.root.size] = (
-        pyramid.features[1][rootpos[0]:rootpos[0]+rrows,
-                            rootpos[1]:rootpos[1]+rcols]
+        pyramid.features[1][rootpos[1]:rootpos[1]+rrows,
+                            rootpos[0]:rootpos[0]+rcols]
     ).flatten('C')
     offset = offset + comp.root.size;
     # part filters
@@ -172,17 +176,18 @@ def mixture_matching(pyramid, mixture):
         part = comp.parts[i]
         prows, pcols = part.shape[0:2]
         uli, ulj = absolutepos[i]
-        latvec[offset:offset+part.size] = (
-            pyramid.features[0][uli:uli+prows,ulj:ulj+pcols]
-        ).flatten('C')
+        subwindow = pyramid.features[0][uli:uli+prows,ulj:ulj+pcols]
+        latvec[offset:offset+part.size] = subwindow.flatten('C')
         offset = offset + part.size
     
-    # deformation 
+    # deformation
     for i in range(0, len(comp.parts)):
-        latvec[offset:offset+4] = comp.deforms[i]
+        dx = displacements[i][1]
+        dy = displacements[i][0]
+        latvec[offset:offset+4] = -np.array([dx, dy, dx**2, dy**2])
         offset = offset + 4
 
     # bias
-    latvec[len(latvec) - 1] = comp.bias
+    latvec[len(latvec) - 1] = 1
 
     return (score, c, latvec)

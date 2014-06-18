@@ -23,18 +23,19 @@ def computefeaturemap(image, mindimdiv, feature, featdim):
     # Compute the number of division for the height
     n = mindimdiv
     m = int(round(height * n / width))
-    jstep = width / n
-    istep = height / m
     
     featuremap = np.empty([m, n, featdim])
+    # We cut up the image into an m by n grid. To avoir rounding errors, we
+    # first compute the points of the grid, then iterate over them.
+    rowindexes = np.round(np.linspace(0, height, num=m+1)).astype(np.int32)
+    colindexes = np.round(np.linspace(0, width, num=n+1)).astype(np.int32)
 
     for i in range(0,m):
+        starti = rowindexes[i]
+        endi = rowindexes[i+1]
         for j in range(0,n):
-            # ugly stuff to minimize rounding errors
-            starti = int(round(i * height / n)) if i > 0 else 0
-            startj = int(round(j * width / m)) if j > 0 else 0
-            endi = int(round((i + 1) * height / n)) if i < m - 1 else height -1
-            endj = int(round((j + 1) * width / m)) if j < n - 1 else width - 1
+            startj = colindexes[j]
+            endj = colindexes[j+1]
             block = image[starti:endi,startj:endj]
             # Compute its feature
             featuremap[i,j,:] = feature(block)
@@ -65,7 +66,7 @@ class FeatPyramid:
                                                           interpolation=cv2.INTER_CUBIC)
                                                ,mindimdiv, feature, featdim))
 
-def colorhistogram(image, nbbins=(4,4,4), limits=((0,255),(0,255),(0,255))):
+def colorhistogram(image, nbbins=(4,4,4), limits=(0,255,0,255,0,255)):
     """ Compute a color histogram of an image in a numpy array.
     
     Arguments:
@@ -82,6 +83,7 @@ def colorhistogram(image, nbbins=(4,4,4), limits=((0,255),(0,255),(0,255))):
         An nbbins shaped numpy array containing the color histogram of the input image.
     """
     nbchannels = image.shape[2]
+
     return cv2.calcHist([image], range(0, nbchannels), None, nbbins, limits)
 
 """ Computes lab histogram of an image.

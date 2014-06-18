@@ -46,7 +46,7 @@ class TestMatching(unittest.TestCase):
         """ Test single component matching a test image with a random dpm
         """
         img = cv2.cvtColor(
-            cv2.imread("data/images/source/asahina_mikuru_2.jpg"),
+            cv2.imread("data/images/source/asahina_mikuru_2.jpg").astype(np.float32) / 255,
             cv2.COLOR_BGR2LAB
         )
         nbbins = (4,4,4)
@@ -73,7 +73,7 @@ class TestMatching(unittest.TestCase):
 
     def test_mixture_matching(self):
         img = cv2.cvtColor(
-            cv2.imread("data/images/source/asahina_mikuru_2.jpg"),
+            cv2.imread("data/images/source/asahina_mikuru_2.jpg").astype(np.float32) / 255,
             cv2.COLOR_BGR2LAB
         )
         nbbins = (4,4,4)
@@ -87,19 +87,22 @@ class TestMatching(unittest.TestCase):
         root1 = pyramid.features[1]
         part1_1 = pyramid.features[0][10:20,10:20]
         part2_1 = pyramid.features[0][20:30,20:30]
-        model1 = dpm.DPM(root1, [part1_1, part2_1], 
+        model1 = dpm.DPM(root1, [part1_1, part2_1],
                          [np.array([10,10]), np.array([20,20])],
                          [np.array([0,0,0.1,0.1])] * 2, 1)
-        root2 = pyramid.features[1][10:30,10:30]
-        part1_2 = pyramid.features[0][0:20,0:20]
-        part2_2 = pyramid.features[0][20:40,20:40]
+        root2 = pyramid.features[1][5:15,5:15]
+        part1_2 = pyramid.features[0][10:15,10:15]
+        part2_2 = pyramid.features[0][15:30,15:30]
         model2 = dpm.DPM(root2, [part1_2, part2_2],
-                         [np.array([0,0]), np.array([20,20])],
+                         [np.array([0,0]), np.array([10,10])],
                          [np.array([0,0,0.1,0.1])] * 2, 1)
         mixture = dpm.Mixture([model1,model2])
         (score, c, latvec) = matching.mixture_matching(pyramid, mixture)
         # Check that the latent vector gives the proper score
-        self.assertAlmostEqual(score, numpy.vdot(latvec, mixture.dpms[c].tovector()))
+        modelvector = mixture.dpms[c].tovector()
+        print repr(modelvector.sum())
+        print repr(latvec.sum())
+        self.assertAlmostEqual(score, np.vdot(latvec, modelvector))
 
 if __name__ == "__main__":
     unittest.main()
