@@ -132,6 +132,12 @@ class DPMSize:
         self.partshapes = partshapes
         self.anchors = anchors
 
+    def vectorsize(self):
+        return (np.prod(self.rootshape) + 
+                np.sum(map(lambda ps: np.prod(ps),self.partshapes)) +
+                len(self.partshapes) * 4 +
+                1)
+
     def __repr__(self):
         return "%s(%r)" % (self.__class__, self.__dict__)
 
@@ -177,6 +183,9 @@ class MixtureSize:
     def __init__(self, dpmsizes):
         self.dpmsizes = dpmsizes
 
+    def vectorsize(self):
+        return sum(map(lambda psize: psize.vectorsize(), self.dpmsizes))
+
     def __repr__(self):
         return "%s(%r)" % (self.__class__, self.__dict__)
 
@@ -217,12 +226,22 @@ def vectortomixture(vector, mixturesize):
     for dpmsize in mixturesize.dpmsizes:
         # The size of the subvector is the sum of filter sizes, deformation
         # sizes and the bias
-        subvecsize = (np.prod(dpmsize.rootshape) + 
-                      np.sum(map(lambda ps: np.prod(ps),dpmsize.partshapes)) +
-                      len(dpmsize.partshapes) * 4 +
-                      1)
+        subvecsize = dpmsize.vectorsize()
                       
         dpms.append(vectortodpm(vector[offset:offset+subvecsize],
                                 dpmsize))
         offset = offset + subvecsize
     return Mixture(dpms)
+
+def comp_latent_to_mixture(vector, mixturesize, compidx, outsize):
+    """ Embeds a latent vector from a non-mixture DPM into a mixture
+        vector.
+    """
+    offset = 0
+    
+    for c in range(0,compidx):
+        offset = offset + mixturesize.dpmsizes[i].vectorsize()
+    mixturevec = np.zeros([outsize])
+    compsize = mixturesize.dpmsizes[compidx].vectorsize()
+    mixturevec[offset:offset+compsize] = vector
+    return mixturevec

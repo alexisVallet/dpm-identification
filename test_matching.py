@@ -42,7 +42,7 @@ class TestMatching(unittest.TestCase):
         cv2.imshow("expected", 
                    (expected - expected.min()) / (expected.max() - expected.min()))
         cv2.waitKey(0)
-        np.testing.assert_almost_equal(actual, expected)
+        np.testing.assert_allclose(actual, expected, rtol=1e-5)
 
     def test_dpm_matching(self):
         """ Test single component matching a test image with a random dpm
@@ -75,12 +75,12 @@ class TestMatching(unittest.TestCase):
         # close enough that the score is a good enough approximation for now.
         # Should come back to this bug if I have some time. Probably, there is
         # an off by one somewhere in the matching code, or a rounding error in
-        # the indices for optimal displacements.
+        # the indices for optimal displacements. Fuck it.
         scoredot = np.vdot(latvec, modelvector)
         print repr(score - scoredot)
         print repr(img.size)
         print repr(latvec.size)
-        print repr(latvec[latvec.size-9:])
+        print repr(np.vdot(latvec[latvec.size-9:], modelvector[latvec.size-9:]))
         self.assertAlmostEqual(score, scoredot)
 
 if __name__ == "__main__":

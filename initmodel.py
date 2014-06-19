@@ -2,34 +2,133 @@
 character identification.
 """
 import dpm
+import featpyramid as pyr
 import cv2
 import numpy as np
-import sklearn as skl
+import sklearn.svm as sklsvm
+import sklearn.decomposition as skldecomp
+import sklearn.cluster as sklcluster
 
-def mean_aspect_ratio(images):
-    """ Computes the mean aspect ratio across a set of images.
+def dimred(featuremaps, minvar=0.8):
+    """ Perform dimensionality reduction on a set of feature maps using PCA.
     
     Arguments:
-        images array of images.
-    Return:
-        floating point mean aspect ratio.
+        featuremaps    list of feature maps to perform dimensionality reduction
+                       on
+        minvar         minimum amount of variance ratio to keep.
+    
+    Returns:
+        (X, var) where X is a n by m matrix where n is the number of 
+        feature maps containing vectors representing each feature map as row.
+        var is the variance ratio preserved.
     """
-    return sum(map(lambda img: img.shape[1]/img.shape[0]))
+    # flatten the feature maps into a data matrix
+    X = np.empty([len(featuremaps), featuremaps[0].size])
+    
+    for i in range(0,len(featuremaps)):
+        X[i,:] = featuremaps[i].flatten('C')
 
-def initialize_roots(trainingimages, feature):
-    """ Initialize the root filters of a mixture of deformable parts model. Uses
-        a method inspired by Divvala et al., 2012 to cluster the training data, except
-        we first apply PCA for dimensionality reduction and use DBSCALE in order to
-        determine a suitable number of roots.
-    
+    # run PCA
+    pca = skldecomp.PCA(n_components = minvar)
+
+    Y = pca.fit_transform(X)
+
+    return (Y, sum(pca.explained_variance_ratio_))
+
+def train_root(positives, negatives):
+    """ Trains a root filter using a linear SVM for initialization purposes.
+
     Arguments:
-        trainingimages  array of training images.
-        feature         feature function to use, takes an image as input and should
-                        return a f-dimensional vector.
-    Return:
-        array of roots represented by feature maps.
+        positives positive images for the component.
+        negatives negative images for the component.
+
+    Returns:
+       An initial root filter for the component.
     """
-    # Warp (resize) all examples to the average aspect ratio across all 
-    # images, compute feature maps for each of them.
-    meanar = mean_aspect_ratio(trainingimages)
+    # Initialize the root filter to the mean aspect ratio across
+    # positives in the component, and size not larger than 80% of
+    # the positives in the component.
+    meanar = np.mean(map(lambda img: img.shape[1] / img.shape[0], 
+                         positives))
+    size = np.percentile(map(lambda img: np.prod(img.shape[0:2]), 
+                             positives), 20)
+    # Determine the corresponding width and height with 
+    # some basic algebra
+    width = np.sqrt(meanar * size)
+    height = size / width
     
+    # round them to number of rows and columns
+    rows, cols = np.round(np.array([width,height])).astype(np.int32)
+    
+    # train the root filter using a linear SVM with the positives
+    # in the component and all the negatives.
+    
+    # if the aspect ratio > 1, then we want more columns, otherwise
+    # we want more rows.
+    nbrowfeat, nbcolfeat = ((mindimdiv, int(mindimdiv * meanar))
+                            if meanar > 1 else 
+                            (int(mindimdiv * meanar), mindimdiv))
+    tofeatmap = lambda pos: (
+        pyr.compute_featmap(pos, nbrowfeat, nbcolfeat, feature, featdim)
+    )
+    
+    # prepare data for the linear SVM
+    posmaps = map(tofeatmap, positives)
+    negmaps = map(tofeatmap, negatives)
+    roottraindata = np.empty([len(posmaps) + len(negmaps), mindimdiv**2 * featdim])
+    roottrainlabels = np.empty([len(posmaps) + len(negmaps)], np.int32)
+    i = 0
+    for posmap in posmaps:
+        roottraindata[i,:] = posmap.flatten('C')
+        roottrainlabels[i] = 1
+        i = i + 1
+    for negmap in negmaps:
+        roottraindata[i,:] = negmap.flatten('C')
+        roottrainlabels[i] = -1
+        i = i + 1
+        
+    # run SVM training, keep only the resulting feature weights
+    roottrainer = sklsvm.LinearSVC(loss='l1', C=C)
+    roottrainer.fit(roottraindata, roottrainlabels)
+    featweights = roottrainer.coef_
+
+    # if I am not mistaken, the weight vector should be a feature map
+    # in row major order.
+    return featweights.reshape([nbrowfeat, nbcolfeat, featdim])
+
+def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01):
+    """ Initialize a mixture model for a given class. Uses dimensionality
+        reduction and clustering to guess the components. Uses segmentation 
+        to guess the parts. So there is no need to specify them.
+
+    Arguments:
+        positives    positive images for the class.
+        negatives    negative images for the class.
+        feature      feature function to use.
+        featdim      dimensionality of the features.
+
+    Returns:
+        An initial mixture model for the class. 
+    """
+    # Warp positive images into a common feature space
+    featuremaps = map(lambda pos: pyr.compute_featmap(pos, mindimdiv, mindimdiv, 
+                                                      feature, featdim),
+                      positives)
+    # Run dimensionality reduction for clustering
+    (redfeat, var) = dimred(featuremaps, 0.9)
+    
+    # Cluster them into components using DBSCAN
+    clustering = sklcluster.DBSCAN(metric='correlation')
+    complabels = np.round(clustering.fit_predict(redfeat)).astype(np.int32)
+    mincomplabel = complabels.min()
+    nbcomps = complabels.max() - mnincomplabel
+    components = [[]] * nbcomps
+    
+    for i in range(0,len(positives)):
+        components[complabels[i]].append(positives[i])
+    
+    # Initialize root filters for each component
+    rootfilters = []
+
+    for compsamples in components:
+        

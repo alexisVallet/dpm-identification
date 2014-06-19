@@ -155,8 +155,10 @@ def mixture_matching(pyramid, mixture):
     for i in range(0, len(comp.parts)):
         ancj, anci = rootpos + comp.anchors[i]
         absolutepos.append(displacemaps[i][anci, ancj])
-        displacements.append(displacemaps[i][anci, ancj] - 
-                             np.array([anci,ancj], dtype=np.int32))
+        displacements.append(
+            np.array([anci,ancj], dtype=np.int32) -
+            displacemaps[i][anci, ancj]
+        )
         latvecsize = latvecsize + comp.parts[i].size
     
     # Compute the latent vector for the component, required for gradient

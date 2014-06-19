@@ -6,7 +6,26 @@ import skimage.transform as trans
 import math
 import sys
 
-def computefeaturemap(image, mindimdiv, feature, featdim):
+def compute_featmap(image, n, m, feature, featdim):
+    height, width = image.shape[0:2]
+    featuremap = np.empty([m, n, featdim])
+    # We cut up the image into an m by n grid. To avoir rounding errors, we
+    # first compute the points of the grid, then iterate over them.
+    rowindexes = np.round(np.linspace(0, height, num=m+1)).astype(np.int32)
+    colindexes = np.round(np.linspace(0, width, num=n+1)).astype(np.int32)
+
+    for i in range(0,m):
+        starti = rowindexes[i]
+        endi = rowindexes[i+1]
+        for j in range(0,n):
+            startj = colindexes[j]
+            endj = colindexes[j+1]
+            block = image[starti:endi,startj:endj]
+            # Compute its feature
+            featuremap[i,j,:] = feature(block)
+    return featuremap
+
+def compute_regular_featmap(image, mindimdiv, feature, featdim):
     # Compute the features for each layer. A feature is represented as a 3d
     # numpy array with dimensions w*h*featdim where w and h are the width and
     # height of the input downsampled image.        
@@ -23,24 +42,12 @@ def computefeaturemap(image, mindimdiv, feature, featdim):
     # Compute the number of division for the height
     n = mindimdiv
     m = int(round(height * n / width))
-    
-    featuremap = np.empty([m, n, featdim])
-    # We cut up the image into an m by n grid. To avoir rounding errors, we
-    # first compute the points of the grid, then iterate over them.
-    rowindexes = np.round(np.linspace(0, height, num=m+1)).astype(np.int32)
-    colindexes = np.round(np.linspace(0, width, num=n+1)).astype(np.int32)
 
-    for i in range(0,m):
-        starti = rowindexes[i]
-        endi = rowindexes[i+1]
-        for j in range(0,n):
-            startj = colindexes[j]
-            endj = colindexes[j+1]
-            block = image[starti:endi,startj:endj]
-            # Compute its feature
-            featuremap[i,j,:] = feature(block)
+    featuremap = compute_featmap(image, n, m, feature, featdim)
+    
     if rotated:
         featuremap = np.transpose(featuremap, (1,0,2))
+
     return featuremap
 
 class FeatPyramid:
@@ -60,14 +67,13 @@ class FeatPyramid:
         """
         # Compute full-resolution feature map
         self.features = []
-        self.features.append(computefeaturemap(image, mindimdiv * 2, feature, featdim))
+        self.features.append(
+            compute_regular_featmap(image, mindimdiv * 2, feature, featdim)
+        )
         # And half-resolution feature map
-        self.features.append(computefeaturemap(cv2.resize(image, None, fx=0.5, fy=0.5,
-                                                          interpolation=cv2.INTER_CUBIC)
-                                               ,mindimdiv, feature, featdim))
+        self.features.append(
+            compute_regular_featmap(cv2.resize(image, None, fx=0.5, fy=0.5,
+                                               interpolation=cv2.INTER_CUBIC)
+                                               ,mindimdiv, feature, featdim)
+        )
 
-if __name__ == "__main__":
-    img = cv2.imread(sys.argv[1])
-    labimg = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    nbbins = (4,4,4)
-    pyramid = FeatPyramid(img, lambda img: labhistogram(img, nbbins).flatten('C'), 64)
