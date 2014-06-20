@@ -17,20 +17,21 @@ class TestInitmodel(unittest.TestCase):
         # bounding box of the character
         """ Load positive and negative samples as LAB images.
         """
+        cls.charname = 'rei_ayanami'
         cls.imgroot = './data/images/source/'
         cls.bbroot = './data/json/boundingboxes/'
         cls.positivefiles = [f for f in os.listdir(cls.imgroot)
-                             if 'asahina_mikuru'  in f]
+                             if cls.charname in f]
         cls.negativefiles = [f for f in os.listdir(cls.imgroot)
-                             if (not 'asahina_mikuru' in f) and
+                             if (not cls.charname in f) and
                              f.endswith('.jpg')]
         # only keep a random subset of 100 negative images 
         # (loading all the negatives takes too long)
         # fixed seed for repeatable results.
-        np.random.seed(1)
-        cls.negativefiles = np.random.permutation(
-            cls.negativefiles
-        )[0:100]
+        #np.random.seed(1)
+        #cls.negativefiles = np.random.permutation(
+         #   cls.negativefiles
+        #)[0:]
 
         def loadandconvert(filename):
             bgrimg = cv2.imread(
@@ -76,15 +77,33 @@ class TestInitmodel(unittest.TestCase):
         self.assertLessEqual(X.shape[1], featuremaps[0].size)
 
     def test_train_root(self):
-        nbbins = (7,7,7)
-        root = init.train_root(self.positives, self.negatives,
-                               15, feat.bgrhistogram(nbbins),
-                               np.prod(nbbins))
-        img = feat.visualize_featmap(root,
-                                     feat.bgrhistvis(nbbins),
-                                     blocksize=(1,1))
-        cv2.namedWindow("learned root", cv2.WINDOW_NORMAL)
-        cv2.imshow("learned root", img)
+        nbbins = (4,4,4)
+        feature = feat.bgrhistogram(nbbins)
+        vis = feat.bgrhistvis(nbbins)
+        featdim = np.prod(nbbins)
+        mindimdiv = 10
+        # compute feature maps
+        featuremaps = map(lambda pos: feat.compute_featmap(pos, mindimdiv, mindimdiv, 
+                                                           feature, featdim),
+                          self.positives)
+        # dimensionality reduction
+        (redfeat, var) = init.dimred(featuremaps, 0.9)
+        # cluster the positives into components:
+        comps = init.cluster_comps(self.positives, redfeat)
+        print "detected " + repr(len(comps)) + " components"
+        # for each cluster, compute a root
+        roots = []
+        for positives in comps:
+            print repr(len(positives))
+            root = init.train_root(positives, self.negatives,
+                                   mindimdiv, feature, featdim)
+            roots.append(root)
+        i = 0
+        for root in roots:
+            img = feat.visualize_featmap(root, vis, blocksize=(1,1))
+            cv2.namedWindow("root " + repr(i), cv2.WINDOW_NORMAL)
+            cv2.imshow("root " + repr(i), img)
+            i = i + 1
         cv2.waitKey(0)
 
 if __name__ == "__main__":

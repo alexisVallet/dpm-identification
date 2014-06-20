@@ -9,6 +9,7 @@ import numpy as np
 import sklearn.svm as sklsvm
 import sklearn.decomposition as skldecomp
 import sklearn.cluster as sklcluster
+import sklearn.metrics as skmetrics
 
 def dimred(featuremaps, minvar=0.8):
     """ Perform dimensionality reduction on a set of feature maps using 
@@ -93,6 +94,24 @@ def train_root(positives, negatives, mindimdiv, feature, featdim, C=0.01):
     # The weight vector should be in column-major (Fortran) order.
     return featweights.reshape([nbrowfeat, nbcolfeat, featdim])
 
+def cluster_comps(positives, redfeat):
+    def correlation_distance(u, v):
+        u_ = u - u.mean()
+        v_ = v - v.mean()
+        return 1 - (np.vdot(u_, v_) / (np.linalg.norm(u_) * np.linalg.norm(v_)))
+    clustering = sklcluster.DBSCAN(metric=correlation_distance)
+    complabels = np.round(clustering.fit_predict(redfeat)).astype(np.int32)
+    mincomplabel = complabels.min()
+    nbcomps = complabels.max() - mincomplabel
+    components = []
+    for i in range(0,nbcomps):
+        components.append([])
+    
+    for i in range(0,len(positives)):
+        components[complabels[i]].append(positives[i])
+
+    return components
+
 def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01):
     """ Initialize a mixture model for a given class. Uses dimensionality
         reduction and clustering to guess the components. Uses 
@@ -116,14 +135,6 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
     (redfeat, var) = dimred(featuremaps, 0.9)
     
     # Cluster them into components using DBSCAN
-    clustering = sklcluster.DBSCAN(metric='correlation')
-    complabels = np.round(clustering.fit_predict(redfeat)).astype(np.int32)
-    mincomplabel = complabels.min()
-    nbcomps = complabels.max() - mnincomplabel
-    components = [[]] * nbcomps
-    
-    for i in range(0,len(positives)):
-        components[complabels[i]].append(positives[i])
     
     # Initialize root filters for each component
     rootfilters = []
