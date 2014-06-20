@@ -3,6 +3,7 @@ character identification.
 """
 import dpm
 import featpyramid as pyr
+import features as feat
 import cv2
 import numpy as np
 import sklearn.svm as sklsvm
@@ -50,28 +51,22 @@ def train_root(positives, negatives, mindimdiv, feature, featdim, C=0.01):
     # Initialize the root filter to the mean aspect ratio across
     # positives in the component, and size not larger than 80% of
     # the positives in the component.
-    meanar = np.mean(map(lambda img: img.shape[1] / img.shape[0], 
+    meanar = np.mean(map(lambda img: float(img.shape[1]) / float(img.shape[0]),
                          positives))
-    size = np.percentile(map(lambda img: np.prod(img.shape[0:2]), 
-                             positives), 20)
-    # Determine the corresponding width and height with 
-    # some basic algebra
-    width = np.sqrt(meanar * size)
-    height = size / width
-    
-    # round them to number of rows and columns
-    rows, cols = np.round(np.array([width,height])).astype(np.int32)
-    
     # train the root filter using a linear SVM with the positives
     # in the component and all the negatives.
     
     # if the aspect ratio > 1, then we want more columns, otherwise
-    # we want more rows.
-    nbrowfeat, nbcolfeat = ((mindimdiv, int(mindimdiv * meanar))
-                            if meanar > 1 else 
-                            (int(mindimdiv * meanar), mindimdiv))
+    # we want more rows - while the minimum should stay the same.
+    nbrowfeat, nbcolfeat = (None, None)
+    
+    if meanar > 1:
+        nbrowfeat, nbcolfeat = (mindimdiv, int(round(float(mindimdiv) * meanar)))
+    else:
+        nbrowfeat, nbcolfeat = (int(round(float(mindimdiv) * (1/meanar))), mindimdiv)
+
     tofeatmap = lambda pos: (
-        pyr.compute_featmap(pos, nbrowfeat, nbcolfeat, feature, featdim)
+        feat.compute_featmap(pos, nbrowfeat, nbcolfeat, feature, featdim)
     )
     
     # prepare data for the linear SVM
@@ -87,17 +82,16 @@ def train_root(positives, negatives, mindimdiv, feature, featdim, C=0.01):
         i = i + 1
     for negmap in negmaps:
         roottraindata[i,:] = negmap.flatten('C')
-        roottrainlabels[i] = -1
+        roottrainlabels[i] = 0
         i = i + 1
-        
+    
     # run SVM training, keep only the resulting feature weights
-    roottrainer = sklsvm.LinearSVC(loss='l1', C=C)
+    roottrainer = sklsvm.LinearSVC(C=C, loss='l1')
     roottrainer.fit(roottraindata, roottrainlabels)
     featweights = roottrainer.coef_
 
-    # if I am not mistaken, the weight vector should be a feature map
-    # in row major order.
-    return featweights.reshape([nbrowfeat, nbcolfeat, featdim], order='C')
+    # The weight vector should be in column-major (Fortran) order.
+    return featweights.reshape([nbrowfeat, nbcolfeat, featdim])
 
 def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01):
     """ Initialize a mixture model for a given class. Uses dimensionality
@@ -115,7 +109,7 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
         An initial mixture model for the class. 
     """
     # Warp positive images into a common feature space
-    featuremaps = map(lambda pos: pyr.compute_featmap(pos, mindimdiv, mindimdiv, 
+    featuremaps = map(lambda pos: feat.compute_featmap(pos, mindimdiv, mindimdiv, 
                                                       feature, featdim),
                       positives)
     # Run dimensionality reduction for clustering
