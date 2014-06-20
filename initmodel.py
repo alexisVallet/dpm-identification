@@ -10,17 +10,18 @@ import sklearn.decomposition as skldecomp
 import sklearn.cluster as sklcluster
 
 def dimred(featuremaps, minvar=0.8):
-    """ Perform dimensionality reduction on a set of feature maps using PCA.
-    
+    """ Perform dimensionality reduction on a set of feature maps using 
+    PCA.
+  
     Arguments:
-        featuremaps    list of feature maps to perform dimensionality reduction
-                       on
+        featuremaps    list of feature maps to perform dimensionality 
+                       reduction on
         minvar         minimum amount of variance ratio to keep.
     
     Returns:
         (X, var) where X is a n by m matrix where n is the number of 
-        feature maps containing vectors representing each feature map as row.
-        var is the variance ratio preserved.
+        feature maps containing vectors representing each feature map as 
+        row. var is the variance ratio preserved.
     """
     # flatten the feature maps into a data matrix
     X = np.empty([len(featuremaps), featuremaps[0].size])
@@ -35,8 +36,9 @@ def dimred(featuremaps, minvar=0.8):
 
     return (Y, sum(pca.explained_variance_ratio_))
 
-def train_root(positives, negatives):
-    """ Trains a root filter using a linear SVM for initialization purposes.
+def train_root(positives, negatives, mindimdiv, feature, featdim, C=0.01):
+    """ Trains a root filter using a linear SVM for initialization 
+        purposes.
 
     Arguments:
         positives positive images for the component.
@@ -75,7 +77,8 @@ def train_root(positives, negatives):
     # prepare data for the linear SVM
     posmaps = map(tofeatmap, positives)
     negmaps = map(tofeatmap, negatives)
-    roottraindata = np.empty([len(posmaps) + len(negmaps), mindimdiv**2 * featdim])
+    roottraindata = np.empty([len(posmaps) + len(negmaps), 
+                              nbrowfeat * nbcolfeat * featdim])
     roottrainlabels = np.empty([len(posmaps) + len(negmaps)], np.int32)
     i = 0
     for posmap in posmaps:
@@ -94,12 +97,13 @@ def train_root(positives, negatives):
 
     # if I am not mistaken, the weight vector should be a feature map
     # in row major order.
-    return featweights.reshape([nbrowfeat, nbcolfeat, featdim])
+    return featweights.reshape([nbrowfeat, nbcolfeat, featdim], order='C')
 
 def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01):
     """ Initialize a mixture model for a given class. Uses dimensionality
-        reduction and clustering to guess the components. Uses segmentation 
-        to guess the parts. So there is no need to specify them.
+        reduction and clustering to guess the components. Uses 
+        segmentation to guess the parts. So there is no need to specify 
+        the number of either of them.
 
     Arguments:
         positives    positive images for the class.
@@ -129,6 +133,3 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
     
     # Initialize root filters for each component
     rootfilters = []
-
-    for compsamples in components:
-        
