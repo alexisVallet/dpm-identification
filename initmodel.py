@@ -1,15 +1,18 @@
 """ Initialization procedure for a mixture of deformable parts model, as relevant for
 character identification.
 """
-import dpm
-import featpyramid as pyr
-import features as feat
 import cv2
 import numpy as np
 import sklearn.svm as sklsvm
 import sklearn.decomposition as skldecomp
 import sklearn.cluster as sklcluster
 import sklearn.metrics as skmetrics
+import math
+
+import dpm
+import featpyramid as pyr
+import features as feat
+import training as train
 
 def dimred(featuremaps, minvar=0.8):
     """ Perform dimensionality reduction on a set of feature maps using 
@@ -54,18 +57,14 @@ def train_root(positives, negatives, mindimdiv, feature, featdim, C=0.01):
     # the positives in the component.
     meanar = np.mean(map(lambda img: float(img.shape[1]) / float(img.shape[0]),
                          positives))
+    nbcells = np.percentile(map(lambda img: np.prod(feat.regular_grid(img,mindimdiv)),
+                                positives),
+                            20)
+    # basic linear algebra tells us the rough dimensions of the root
+    nbrowfeat = int(round(math.sqrt(float(nbcells) / meanar)))
+    nbcolfeat = int(round(meanar * nbrowfeat))
     # train the root filter using a linear SVM with the positives
     # in the component and all the negatives.
-    
-    # if the aspect ratio > 1, then we want more columns, otherwise
-    # we want more rows - while the minimum should stay the same.
-    nbrowfeat, nbcolfeat = (None, None)
-    
-    if meanar > 1:
-        nbrowfeat, nbcolfeat = (mindimdiv, int(round(float(mindimdiv) * meanar)))
-    else:
-        nbrowfeat, nbcolfeat = (int(round(float(mindimdiv) * (1/meanar))), mindimdiv)
-
     tofeatmap = lambda pos: (
         feat.compute_featmap(pos, nbrowfeat, nbcolfeat, feature, featdim)
     )
@@ -91,10 +90,16 @@ def train_root(positives, negatives, mindimdiv, feature, featdim, C=0.01):
     roottrainer.fit(roottraindata, roottrainlabels)
     featweights = roottrainer.coef_
 
-    # The weight vector should be in column-major (Fortran) order.
+    # The weight vector somehow lies in feature space, with some
+    # strange things. Still have to figure out how to properly
+    # normalize it into something useful. It looks good for color
+    # histograms if we drop negative values.
     return featweights.reshape([nbrowfeat, nbcolfeat, featdim])
 
 def cluster_comps(positives, redfeat):
+    # Cluster positives with DBSCAN using correlation distance.
+    # Correlation distance is very relevant here, as it is closely
+    # related to the dot product - which is what we want to maximize.
     def correlation_distance(u, v):
         u_ = u - u.mean()
         v_ = v - v.mean()
@@ -127,14 +132,32 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
     Returns:
         An initial mixture model for the class. 
     """
-    # Warp positive images into a common feature space
-    featuremaps = map(lambda pos: feat.compute_featmap(pos, mindimdiv, mindimdiv, 
-                                                      feature, featdim),
+    # compute feature maps
+    featuremaps = map(lambda pos: 
+                      feat.compute_featmap(
+                          pos, mindimdiv, mindimdiv, 
+                          feature, featdim),
                       positives)
-    # Run dimensionality reduction for clustering
+    # dimensionality reduction
     (redfeat, var) = dimred(featuremaps, 0.9)
+    # cluster the positives into components:
+    comps = cluster_comps(positives, redfeat)
+    # for each cluster, compute a root
+    roots = []
+    for positives in comps:
+        root = train_root(positives, negatives,
+                          mindimdiv, feature, featdim)
+        roots.append(root)
+    # combine them into a part-less mixture, run the full LSVM
+    # training algorithm on it.
+    mixture = dpm.Mixture(map(lambda root: dpm.DPM(root, [], [], [], 1),
+                              roots))
+    # build feature pyramids for all samples
+    def buildpyramid(img):
+        return pyr.FeatPyramid(img, feature, featdim, mindimdiv)
+
+    pospyr = map(buildpyramid, positives)
+    negpyr = map(buildpyramid, negatives)
+    newmixture = train.train(mixture, pospyr, negpyr, nbiter=4, C=C)
     
-    # Cluster them into components using DBSCAN
-    
-    # Initialize root filters for each component
-    rootfilters = []
+    return newmixture

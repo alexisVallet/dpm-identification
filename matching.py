@@ -168,29 +168,62 @@ def mixture_matching(pyramid, mixture):
     # add pyramid subwindows relative to each filter
     # root filter
     rrows, rcols = comp.root.shape[0:2]
+    # As the filters may only be overlapping part of the image, pad the
+    # feature maps with zeros.
+    rpad1 = rrows//2 + 1
+    cpad1 = rcols//2 + 1
+    feat1pad = np.pad(pyramid.features[1], 
+                      [(rpad1,rpad1), (cpad1,cpad1), (0,0)],
+                      mode='constant',
+                      constant_values=(0,0))
     rulj, ruli = rootpos // 2
     latvec[0:comp.root.size] = (
-        pyramid.features[1][ruli:ruli+rrows,
-                            rulj:rulj+rcols]
+        feat1pad[rpad1+ruli:rpad1+ruli+rrows,
+                 cpad1+rulj:cpad1+rulj+rcols]
     ).flatten('C')
     offset = offset + comp.root.size;
     # part filters
-    for i in range(0, len(comp.parts)):
-        part = comp.parts[i]
-        prows, pcols = part.shape[0:2]
-        uli, ulj = absolutepos[i]
-        subwindow = pyramid.features[0][uli:uli+prows,ulj:ulj+pcols]
-        latvec[offset:offset+part.size] = subwindow.flatten('C')
-        offset = offset + part.size
+    # first pad the 0 feature map with zeros using the largest
+    # part size.
+    if not (comp.parts == []):
+        rpad0 = np.amax(map(lambda p: p.shape[0], comp.parts))//2 + 1
+        cpad0 = np.amax(map(lambda p: p.shape[1], comp.parts))//2 + 1
+        
+        feat0pad = np.pad(pyramid.features[0],
+                          [(rpad0,rpad0), (cpad0, cpad0), (0,0)],
+                          mode='constant',
+                          constant_values=(0,0))
+
+        for i in range(0, len(comp.parts)):
+            part = comp.parts[i]
+            prows, pcols = part.shape[0:2]
+            uli, ulj = absolutepos[i]
+            subwindow = feat0pad[rpad0+uli:rpad0+uli+prows,
+                                 cpad0+ulj:cpad0+ulj+pcols]
+            latvec[offset:offset+part.size] = subwindow.flatten('C')
+            offset = offset + part.size
     
-    # deformation
-    for i in range(0, len(comp.parts)):
-        dx = displacements[i][1]
-        dy = displacements[i][0]
-        latvec[offset:offset+4] = -np.array([dx, dy, dx**2, dy**2])
-        offset = offset + 4
+        # deformation
+        for i in range(0, len(comp.parts)):
+            dx = displacements[i][1]
+            dy = displacements[i][0]
+            latvec[offset:offset+4] = -np.array([dx, dy, dx**2, dy**2])
+            offset = offset + 4
 
     # bias
     latvec[len(latvec) - 1] = 1
 
-    return (score, c, latvec)
+    # zero padding of the latent vector for the entire mixture
+    leftpad = 0
+    
+    for i in range(0, c):
+        leftpad = leftpad + mixture.dpms[i].size().vectorsize()
+
+    rightpad = 0
+    for i in range(c+1, len(mixture.dpms)):
+        rightpad = rightpad + mixture.dpms[i].size().vectorsize()
+
+    paddedlatvec = np.pad(latvec, [(leftpad, rightpad)], mode='constant',
+                          constant_values=(0,0))
+
+    return (score, c, paddedlatvec)

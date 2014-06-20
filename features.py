@@ -22,28 +22,34 @@ def compute_featmap(image, n, m, feature, featdim):
             featuremap[i,j,:] = feature(block)
     return featuremap
 
-def compute_regular_featmap(image, mindimdiv, feature, featdim):
-    # Compute the features for each layer. A feature is represented as a 3d
-    # numpy array with dimensions w*h*featdim where w and h are the width and
-    # height of the input downsampled image.        
-    # First compute the feature map for the full-resolution layer
+def regular_grid(image, mindimdiv):
+    """ Computes the number of row divisions and column divisions
+        necessary to get blocks that are roughly square, given
+        that the smallest dimension of the image should be divided
+        by mindimdiv.
+    """
     height, width = image.shape[0:2]
     
     # Split the image across the smallest dimension. We assume the width is the
     # the smallest, if that's not the case we transpose it.
     rotated = min(height,width) == height
     if rotated:
-        image = np.transpose(image, (1,0,2))
         height, width = width, height
 
     # Compute the number of division for the height
     n = mindimdiv
     m = int(round(height * n / width))
 
+    return [m,n] if rotated else [n,m]
+
+def compute_regular_featmap(image, mindimdiv, feature, featdim):
+    # Compute the features for each layer. A feature is represented as a 3d
+    # numpy array with dimensions w*h*featdim where w and h are the width and
+    # height of the input downsampled image.        
+    # First compute the feature map for the full-resolution layer
+    [n,m] = regular_grid(image, mindimdiv)
+
     featuremap = compute_featmap(image, n, m, feature, featdim)
-    
-    if rotated:
-        featuremap = np.transpose(featuremap, (1,0,2))
 
     return featuremap
 

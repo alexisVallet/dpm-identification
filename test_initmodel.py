@@ -25,12 +25,12 @@ class TestInitmodel(unittest.TestCase):
         cls.negativefiles = [f for f in os.listdir(cls.imgroot)
                              if (not cls.charname in f) and
                              f.endswith('.jpg')]
-        # only keep a random subset of 100 negative images 
-        # (loading all the negatives takes too long)
+        #only keep a random subset of 100 negative images 
+        #(loading all the negatives takes too long)
         # fixed seed for repeatable results.
         #np.random.seed(1)
         #cls.negativefiles = np.random.permutation(
-         #   cls.negativefiles
+        #    cls.negativefiles
         #)[0:]
 
         def loadandconvert(filename):
@@ -90,21 +90,26 @@ class TestInitmodel(unittest.TestCase):
         (redfeat, var) = init.dimred(featuremaps, 0.9)
         # cluster the positives into components:
         comps = init.cluster_comps(self.positives, redfeat)
-        print "detected " + repr(len(comps)) + " components"
         # for each cluster, compute a root
         roots = []
         for positives in comps:
-            print repr(len(positives))
             root = init.train_root(positives, self.negatives,
                                    mindimdiv, feature, featdim)
             roots.append(root)
-        i = 0
-        for root in roots:
-            img = feat.visualize_featmap(root, vis, blocksize=(1,1))
-            cv2.namedWindow("root " + repr(i), cv2.WINDOW_NORMAL)
-            cv2.imshow("root " + repr(i), img)
-            i = i + 1
-        cv2.waitKey(0)
+
+    def test_initialize_model(self):
+        # parameters to play around with
+        nbbins = (4,4,4)
+        featdim = np.prod(nbbins)
+        feature = feat.bgrhistogram(nbbins)
+        featvis = feat.bgrhistvis(nbbins)
+        mindimdiv = 10
+        C = 0.01
+
+        mixture = init.initialize_model(self.positives, self.negatives,
+                                        feature, featdim, mindimdiv,
+                                        C)
+
 
 if __name__ == "__main__":
     unittest.main()
