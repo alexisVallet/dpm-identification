@@ -11,7 +11,7 @@ import features as feat
 import matching
 import sgd
 
-def lsvmsgd(model, negatives, poslatents, C):
+def lsvmsgd(model, negatives, poslatents, C, verbose=False):
     """ Latent svm stochastic gradient descent for optimizing the model
         given latent values for positive samples.
 
@@ -32,6 +32,8 @@ def lsvmsgd(model, negatives, poslatents, C):
     nb_pos = poslatents.shape[1]
     nb_samples = nb_pos + len(negatives)
     init = model.tovector()
+    # keeping track of percentages of matching for each component
+    negcomps = np.zeros([len(model.dpms)], np.float32)
 
     # gradient computation closure
     def gradient(weights, i):
@@ -51,6 +53,8 @@ def lsvmsgd(model, negatives, poslatents, C):
                 negatives[i - nb_pos],
                 dpm.vectortomixture(weights, modelsize)
             )
+            # keep track of negative matchings
+            negcomps[compidx] += 1
             latvec = latvec_
         fb = np.vdot(weights, latvec)
         hi = None
@@ -61,12 +65,13 @@ def lsvmsgd(model, negatives, poslatents, C):
         return weights + C * float(nb_samples) * hi
     
     # run stochastic gradient descent
-    final = sgd.sgd(nb_samples, init, gradient, verbose=True)
+    final = sgd.sgd(nb_samples, init, gradient, verbose=verbose)
     
     # return the corresponding model
-    return dpm.vectortomixture(final, modelsize)
+    return (dpm.vectortomixture(final, modelsize), 
+            negcomps/negcomps.sum())
 
-def train(initmodel, positives, negatives, nbiter=4, C=0.01):
+def train(initmodel, positives, negatives, nbiter=4, C=0.01, verbose=False):
     """ Trains a mixture of deformable part models using a latent SVM.
 
     Arguments:
@@ -91,23 +96,24 @@ def train(initmodel, positives, negatives, nbiter=4, C=0.01):
         # using the matching algorithm
         print "computing latent values for positive samples..."
         poslatents = np.zeros([vectorsize, len(positives)])
+        poscomps = np.zeros([len(currentmodel.dpms)], np.float32)
         for pi in range(0, len(positives)):
             (score, c, latvec) = matching.mixture_matching(positives[pi],
                                                            currentmodel)
             poslatents[:,pi] = latvec
+            poscomps[c] += 1
         
         # Then optimize the model using stochastic gradient descent
         print "running gradient descent to optimize the mixture..."
-        currentmodel = lsvmsgd(currentmodel, negatives, poslatents, C)
-
-        # debug: show how the model evolves
-        i = 0
-        for comp in currentmodel.dpms:
-            rootimg = feat.visualize_featmap(comp.root, 
-                                             feat.bgrhistvis((4,4,4)))
-            winname = "t = " + repr(t) + " root " + repr(i)
-            cv2.namedWindow(winname, cv2.WINDOW_NORMAL)
-            cv2.imshow(winname, rootimg)
-        cv2.waitKey(0)
+        (currentmodel, negcomps) = lsvmsgd(
+            currentmodel, negatives, poslatents, C,
+            verbose=verbose)
+        if verbose:
+            poscomps /= len(positives)
+            print ("positive component matches: " + 
+                   repr(poscomps))
+            print "negative component matches: " + repr(negcomps)
+            print ("total component matches: " + 
+                   repr((poscomps + negcomps)/2.))
 
     return currentmodel

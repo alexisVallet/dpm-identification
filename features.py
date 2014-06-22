@@ -114,7 +114,15 @@ def np_labhistogram(nbbins):
             [(0,100), (-127, 127), (-127, 127)])[0].astype(np.float64)
         / np.prod(img.shape[0:2])).flatten('C'))
 
-def histvis(bounds, hist):
+def histvis(bounds, hist_):
+    # As the histogram may be the result of (L)SVM training, individual
+    # values may be negative. A negative feature is a feature that
+    # contributes more to the other characters than the one we're
+    # interested in, so we drop it. We then take the square of each
+    # feature.
+    hist = hist_.copy()
+    hist[hist < hist.mean()] = 0
+    hist = np.multiply(hist, hist)
     lbins, abins, bbins = hist.shape
     lbounds, abounds, bbounds = bounds
     # precompute lower and higher bounds for each bin
@@ -124,7 +132,7 @@ def histvis(bounds, hist):
     )
 
     featcolor = np.zeros([3], np.float32)
-    sumbins = 0
+    sumbins = 0.
     
     for li in range(0,lbins):
         medl = (lvals[li] + lvals[li+1])/2
@@ -132,13 +140,12 @@ def histvis(bounds, hist):
             meda = (avals[ai] + avals[ai+1])/2
             for bi in range(0, bbins):
                 # ignore negative coefficients
-                if hist[li,ai,bi] > 0:
-                    medb = (bvals[bi] + bvals[bi+1])/2
-                    bincolor = np.array([medl, meda, medb], np.float32)
-                    featcolor = featcolor + (hist[li,ai,bi] * bincolor)
-                    sumbins = sumbins + hist[li,ai,bi]
+                medb = (bvals[bi] + bvals[bi+1])/2
+                bincolor = np.array([medl, meda, medb], np.float32)
+                featcolor = featcolor + (hist[li,ai,bi] * bincolor)
+                sumbins += hist[li,ai,bi]
 
-    featcolor = featcolor / sumbins
+    featcolor /= sumbins
 
     # return a single pixel image (will be resized by the vizualisation
     # procedure for a full feature map)

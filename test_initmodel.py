@@ -108,7 +108,7 @@ class TestInitmodel(unittest.TestCase):
 
         mixture = init.initialize_model(self.positives, self.negatives,
                                         feature, featdim, mindimdiv,
-                                        C)
+                                        C, verbose=True)
 
 
 if __name__ == "__main__":

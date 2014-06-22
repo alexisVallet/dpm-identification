@@ -6,9 +6,10 @@ import skimage.transform as trans
 import math
 import sys
 import features as feat
+import dpm
 
 class FeatPyramid:
-    def __init__(self, image, feature, featdim, mindimdiv=7):
+    def __init__(self, image, feature, featdim, mixturesize, mindimdiv=7):
         """ Creates a feature pyramid with 2 layers, one full-resolution, 
             the other half resolution, with nbcells for the half 
             resolution one and nbcells*2 for the full resolution one. 
@@ -25,15 +26,22 @@ class FeatPyramid:
                       should be split in the feature map for the 
                       low-resolution layer.
         """
-        # Compute full-resolution feature map
+        # Compute full-resolution feature map for parts
         self.features = []
         self.features.append(
-            feat.compute_regular_featmap(image, mindimdiv * 2, feature, featdim)
-        )
-        # And half-resolution feature map
-        self.features.append(
             feat.compute_regular_featmap(
-                cv2.resize(image, None, fx=0.5, fy=0.5,
-                           interpolation=cv2.INTER_CUBIC)
-                ,mindimdiv, feature, featdim)
+                image, mindimdiv * 2, feature, featdim
+            )
         )
+        # And "half-resolution" feature maps for each root filter
+        self.rootfeatures = []
+        for dpmsize in mixturesize.dpmsizes:
+            self.rootfeatures.append(
+                feat.compute_featmap(
+                    cv2.resize(image, None, fx=0.5, fy=0.5,
+                               interpolation=cv2.INTER_CUBIC),
+                    dpmsize.rootshape[0],
+                    dpmsize.rootshape[1],
+                    feature, 
+                    featdim)
+            )

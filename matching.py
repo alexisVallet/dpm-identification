@@ -6,6 +6,7 @@ import skimage.feature as skifeat
 import gdt
 import dpm
 import featpyramid as fpyr
+import features as feat
 
 def shift(array, vector):
     """ Shift array coefficients, filling with zeros.
@@ -60,7 +61,7 @@ def filter_response(featmap, linfilter):
                              linfilter.astype(np.float32), 
                              cv2.TM_CCORR)
 
-def dpm_matching(pyramid, dpmmodel):
+def dpm_matching(pyramid, dpmmodel, comp):
     """ Computes the matching of a DPM (non mixture nodel) on a
         feature pyramid.
 
@@ -77,8 +78,14 @@ def dpm_matching(pyramid, dpmmodel):
     # Compute the response of all the filters of the dpmmodel one by one
     # by cross correlation. The root filter is correlated to the low
     # resolution layer, and the parts to the high resolution one.
-    rootresponse = filter_response(pyramid.features[1], dpmmodel.root)
-    partresponses = map(lambda part: 
+    
+    # Modification from Felzenszwalb and Girshick: we do not actually
+    # slide the root filter, but just warp the source image to the root
+    # size. This just gives one root response value. Since we roughly
+    # already know where the root is thanks to the bounding box, setting
+    # it as a latent value seems to introduce more noise than signal.
+    rootresponse = np.vdot(pyramid.rootfeatures[comp], dpmmodel.root)
+    partresponses = map(lambda part:
                         filter_response(pyramid.features[0], part),
                         dpmmodel.parts)
     # Apply distance transform to part responses.
@@ -100,26 +107,15 @@ def dpm_matching(pyramid, dpmmodel):
     for i in range(0,len(dpmmodel.parts)):
         shiftedparts.append(shift(gdtpartresp[i], -dpmmodel.anchors[i]))
 
-    # Resize the root to part resolution
-    resizedrootresp = cv2.resize(rootresponse,
-                                 tuple(pyramid.features[0].shape[0:2][::-1]),
-                                 interpolation=cv2.INTER_NEAREST)
     # Sum it all along with bias value
-    scoremap = dpmmodel.bias + resizedrootresp
+    scoremap = dpmmodel.bias + rootresponse
 
     for part in shiftedparts:
         scoremap = scoremap + part
 
-    # Compute the score as the maximum value in the score map, and the root position
-    # as the position of this maximum.
-    ri, rj = np.unravel_index(scoremap.argmax(), scoremap.shape)
-    # Since we match the template by moving its center along the image, and
-    # we expect the position of the top left corner in the rest of the code,
-    # we need to convert it back
-    rootpos = np.array((rj - (dpmmodel.root.shape[1]//2)*2,
-                        ri - (dpmmodel.root.shape[0]//2)*2), np.int32)
-    
-    return (scoremap[ri, rj], rootpos, displacemaps)
+    # Compute the score as the maximum value in the score map. No root
+    # position necessary, just part displacements.
+    return (scoremap.max(), displacemaps)
 
 def mixture_matching(pyramid, mixture):
     """ Matches a mixture model against a feature pyramid, and computes
@@ -140,20 +136,20 @@ def mixture_matching(pyramid, mixture):
     # scoring one's root position and part respnses.
     for i in range(0, len(mixture.dpms)):
         comp = mixture.dpms[i]
-        score, rootpos, displacemaps = dpm_matching(pyramid, comp)
+        score, displacemaps = dpm_matching(pyramid, comp, i)
         if bestcomp == None or bestcomp[0] < score:
-            bestcomp = (score, comp, rootpos, displacemaps, i)
+            bestcomp = (score, comp, displacemaps, i)
     
     # Compute optimal displacements for each part . Also compute the 
     # latent vector size while we're at it.
     absolutepos = []
     displacements = []
-    score, comp, rootpos, displacemaps, c = bestcomp
+    score, comp, displacemaps, c = bestcomp
     # initialize at root filter size + deformations + bias
     latvecsize = comp.root.size + 4 * (len(comp.parts)) + 1
 
     for i in range(0, len(comp.parts)):
-        ancj, anci = rootpos + comp.anchors[i]
+        ancj, anci = comp.anchors[i]
         absolutepos.append(displacemaps[i][anci, ancj])
         displacements.append(
             np.array([anci,ancj], dtype=np.int32) -
@@ -168,19 +164,7 @@ def mixture_matching(pyramid, mixture):
     # add pyramid subwindows relative to each filter
     # root filter
     rrows, rcols = comp.root.shape[0:2]
-    # As the filters may only be overlapping part of the image, pad the
-    # feature maps with zeros.
-    rpad1 = rrows//2 + 1
-    cpad1 = rcols//2 + 1
-    feat1pad = np.pad(pyramid.features[1], 
-                      [(rpad1,rpad1), (cpad1,cpad1), (0,0)],
-                      mode='constant',
-                      constant_values=(0,0))
-    rulj, ruli = rootpos // 2
-    latvec[0:comp.root.size] = (
-        feat1pad[rpad1+ruli:rpad1+ruli+rrows,
-                 cpad1+rulj:cpad1+rulj+rcols]
-    ).flatten('C')
+    latvec[0:comp.root.size] = pyramid.rootfeatures[c].flatten('C')
     offset = offset + comp.root.size;
     # part filters
     # first pad the 0 feature map with zeros using the largest
@@ -192,7 +176,7 @@ def mixture_matching(pyramid, mixture):
         feat0pad = np.pad(pyramid.features[0],
                           [(rpad0,rpad0), (cpad0, cpad0), (0,0)],
                           mode='constant',
-                          constant_values=(0,0))
+                          constant_values=[(0,0),(0,0),(0,0)])
 
         for i in range(0, len(comp.parts)):
             part = comp.parts[i]

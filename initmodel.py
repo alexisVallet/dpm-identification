@@ -117,7 +117,7 @@ def cluster_comps(positives, redfeat):
 
     return components
 
-def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01):
+def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01, verbose=False):
     """ Initialize a mixture model for a given class. Uses dimensionality
         reduction and clustering to guess the components. Uses 
         segmentation to guess the parts. So there is no need to specify 
@@ -142,6 +142,8 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
     (redfeat, var) = dimred(featuremaps, 0.9)
     # cluster the positives into components:
     comps = cluster_comps(positives, redfeat)
+    if verbose:
+        print "Detected " + repr(len(comps)) + " components"
     # for each cluster, compute a root
     roots = []
     for positives in comps:
@@ -152,12 +154,17 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
     # training algorithm on it.
     mixture = dpm.Mixture(map(lambda root: dpm.DPM(root, [], [], [], 1),
                               roots))
+    mixturesize = mixture.size()
     # build feature pyramids for all samples
     def buildpyramid(img):
-        return pyr.FeatPyramid(img, feature, featdim, mindimdiv)
-
+        return pyr.FeatPyramid(img, feature, featdim, 
+                               mixturesize , mindimdiv)
     pospyr = map(buildpyramid, positives)
     negpyr = map(buildpyramid, negatives)
-    newmixture = train.train(mixture, pospyr, negpyr, nbiter=4, C=C)
+    # train the partless mixture
+    newmixture = train.train(mixture, pospyr, negpyr, nbiter=4, C=C,
+                             verbose=verbose)
     
+    # initialize parts using Felzenszwalb's segmentation
+
     return newmixture

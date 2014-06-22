@@ -2,7 +2,7 @@
 """
 import numpy as np
 
-def sgd(nb_samples, init, gradient, regr=0.001, nbiter=5, verbose=False):
+def sgd(nb_samples, init, gradient, t0=2.0, nbiter=5, verbose=False):
     """ Minimizes a function using stochastic gradient descent on a
         dataset.
     
@@ -24,13 +24,7 @@ def sgd(nb_samples, init, gradient, regr=0.001, nbiter=5, verbose=False):
     Returns:
         An nb_features dimensional vector that minimizes the function.
     """
-    # code to initialize the learning rate from scikit-learn (not sure
-    # what the theory is behind it to be honest, but whatever)
-    typw = np.sqrt(1.0 / np.sqrt(regr))
-    eta0 = typw / (1.0 + typw)
-    t = 1.0 / (eta0 * regr)
-    if verbose:
-        print "t0 = " + repr(t)
+    t = t0
     weights = init
     gradient_ = None
 
@@ -40,20 +34,23 @@ def sgd(nb_samples, init, gradient, regr=0.001, nbiter=5, verbose=False):
             print "running epoch " + repr(epoch) + "..."
         # randomly shuffle the data
         randidxs = np.random.permutation(nb_samples)
+        # keep track of the average gradient norm across the epoch
+        sumgradient = 0
 
         # for each sample in the shuffled data, compute a subgradient
         # and update the model accordingly
         for i in randidxs:
             # compute the gradient
             gradient_ = gradient(weights, i)
+            sumgradient += np.linalg.norm(gradient_)
             # update the learning rate
-            alpha = 1.0 / (regr * t)
+            alpha = 1.0 / t
             # compute the new weights
             weights = weights - alpha * gradient_
             # increase the iteration counter
             t += 1
         if verbose:
-            print "gradient norm: " + repr(np.linalg.norm(gradient_))
+            print "avg gradient norm: " + repr(sumgradient / nb_samples)
             print "learning rate: " + repr(alpha)
             print "weights norm: " + repr(np.linalg.norm(weights))
     
