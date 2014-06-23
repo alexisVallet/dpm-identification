@@ -13,6 +13,7 @@ import dpm
 import featpyramid as pyr
 import features as feat
 import training as train
+import segmentation as seg
 
 def dimred(featuremaps, minvar=0.8):
     """ Perform dimensionality reduction on a set of feature maps using 
@@ -146,10 +147,16 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
         print "Detected " + repr(len(comps)) + " components"
     # for each cluster, compute a root
     roots = []
+    i = 0
     for positives in comps:
         root = train_root(positives, negatives,
                           mindimdiv, feature, featdim)
         roots.append(root)
+        img = feat.visualize_featmap(root, feat.bgrhistvis((4,4,4)))
+        cv2.namedWindow("root " + repr(i), cv2.WINDOW_NORMAL)
+        cv2.imshow("root " + repr(i), img)
+        i = i + 1
+    cv2.waitKey(0)
     # combine them into a part-less mixture, run the full LSVM
     # training algorithm on it.
     mixture = dpm.Mixture(map(lambda root: dpm.DPM(root, [], [], [], 1),
@@ -165,6 +172,28 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
     newmixture = train.train(mixture, pospyr, negpyr, nbiter=4, C=C,
                              verbose=verbose)
     
-    # initialize parts using Felzenszwalb's segmentation
+    # initialize parts using Felzenszwalb's segmentation on linearly
+    # interpolated roots
+    newdpms = []
+    i = 0
+    for model in newmixture.dpms:
+        partsandanc = seg.felzenszwalb_segment(
+            cv2.resize(model.root, None, fx=2, fy=2,
+                       interpolation=cv2.INTER_LINEAR)
+        )
+        
+        if verbose:
+            print "found " + repr(len(partsandanc)) + " parts for root " + repr(i)
+            i = i + 1
 
-    return newmixture
+        parts = []
+        anchors = []
+        for partandanc in partsandanc:
+            (anc, part) = partandanc
+            parts.append(part)
+            anchors.append(anc)
+        newdpms.append(dpm.DPM(model.root, parts, anchors,
+                       map(lambda p: np.array([0,0,0.1,0.1]), parts), 
+                       model.bias))
+
+    return dpm.Mixture(newdpms)

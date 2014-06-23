@@ -1,3 +1,6 @@
 [submodule "data"]
 	path = data
 	url = git@github.com:alexisVallet/chardetect-data.git
+[submodule "felzenszwalb-segmentation"]
+	path = felzenszwalb-segmentation
+	url = git@github.com:alexisVallet/felzenszwalb-segmentation.git
