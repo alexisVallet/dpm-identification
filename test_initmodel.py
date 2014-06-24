@@ -17,7 +17,7 @@ class TestInitmodel(unittest.TestCase):
         # bounding box of the character
         """ Load positive and negative samples as LAB images.
         """
-        cls.charname = 'rei_ayanami'
+        cls.charname = 'monkey_d_luffy'
         cls.imgroot = './data/images/source/'
         cls.bbroot = './data/json/boundingboxes/'
         cls.positivefiles = [f for f in os.listdir(cls.imgroot)

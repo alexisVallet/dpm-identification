@@ -124,7 +124,7 @@ def segment_boxes(segmentation, minsize, maxsize):
         ratio = float(area) / float(rows * cols)
         if minsize <= ratio <= maxsize:
             subwins.append(
-                (np.array((x1,y1), np.int32), 
+                (np.array((x1,y1), np.int32),
                  segmentation.fmap[y1:y2+1,x1:x2+1])
             )
 

@@ -15,7 +15,7 @@ cgdt2D.argtypes = [ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
                    ndpointer(ctypes.c_int, flags=("C_CONTIGUOUS",'W')),
                    ndpointer(ctypes.c_int, flags=("C_CONTIGUOUS",'W'))]
 
-def gdt2D(d, f):
+def gdt2D(d, f, rg=None):
     """ Computes the generalized distance transform of a function on a 2D
         grid, with quadratic distance measure.
     
@@ -32,11 +32,13 @@ def gdt2D(d, f):
         - args(p) = argmin_q(f(q) + d(p - q))
     """
     rows, cols = f.shape
+    if rg==None:
+        rg = max(rows,cols)
     df = np.empty(f.shape, dtype=np.float32)
     argi = np.empty([rows,cols,1], dtype=np.int32)
     argj = np.empty([rows,cols,1], dtype=np.int32)
     cgdt2D(d.astype(np.float32), f.astype(np.float32), rows, cols,
-           df, argi, argj)
+           df, argi, argj, rg)
 
     return (df, np.concatenate((argi,argj), axis=2))
 

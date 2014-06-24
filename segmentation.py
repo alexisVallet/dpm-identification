@@ -30,7 +30,7 @@ cfelzseg.argtypes = [
     ctypes.c_int
 ]
 
-def felzenszwalb_segment(featmap, k=None, mincmpsize=0.01, maxcmpsize = 0.8,
+def felzenszwalb_segment(featmap, k=None, mincmpsize=0, maxcmpsize = 0.9,
                          scaletype='CARDINALITY'):
     """ Run a modified version of Felzenszwalb's algorithm designed for
         feature maps. Internally, uses the correlation distance as the
@@ -45,14 +45,14 @@ def felzenszwalb_segment(featmap, k=None, mincmpsize=0.01, maxcmpsize = 0.8,
     rows, cols, fdim = featmap.shape
     # default k
     if k == None:
-        k = min(rows, cols) / 2
+        k = min(rows, cols) / 8
     scaleval = 1 if scaletype == 'VOLUME' else 0
 
     # create the appropriate graph
     graph = cgridgraph(featmap.astype(np.float32), rows, cols, fdim,
                        scaleval)
     # run the segmentation algorithm
-    forest = cfelzseg(k, graph, int(2*mincmpsize*float(rows*cols)), 
+    forest = cfelzseg(k, graph, int(mincmpsize*float(rows*cols)), 
                       rows, cols, scaleval)
     dsforest = dsf.DisjointSetForest(forest)
     segmentation = dsf.Segmentation(dsforest, featmap)

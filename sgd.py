@@ -2,7 +2,7 @@
 """
 import numpy as np
 
-def sgd(nb_samples, init, gradient, t0=2.0, nbiter=5, verbose=False):
+def sgd(nb_samples, init, gradient, t0=1.2, nbiter=5, verbose=False, minalpha=10E-5):
     """ Minimizes a function using stochastic gradient descent on a
         dataset.
     
@@ -27,6 +27,9 @@ def sgd(nb_samples, init, gradient, t0=2.0, nbiter=5, verbose=False):
     t = t0
     weights = init
     gradient_ = None
+    zerograd = np.zeros([init.size])
+    alpha = 1. / t0
+    d = (alpha / minalpha)**(1./(nbiter-1))
 
     # run nbiter epochs
     for epoch in range(nbiter):
@@ -43,8 +46,10 @@ def sgd(nb_samples, init, gradient, t0=2.0, nbiter=5, verbose=False):
             # compute the gradient
             gradient_ = gradient(weights, i)
             sumgradient += np.linalg.norm(gradient_)
-            # update the learning rate
-            alpha = 1.0 / t
+            if np.allclose(gradient_, zerograd, atol=10E-5, rtol=10E-5):
+                if verbose:
+                    print "Converged on epoch " + repr(epoch)
+                return weights
             # compute the new weights
             weights = weights - alpha * gradient_
             # increase the iteration counter
@@ -53,5 +58,7 @@ def sgd(nb_samples, init, gradient, t0=2.0, nbiter=5, verbose=False):
             print "avg gradient norm: " + repr(sumgradient / nb_samples)
             print "learning rate: " + repr(alpha)
             print "weights norm: " + repr(np.linalg.norm(weights))
+        # learning rate update
+        alpha = alpha / d
     
     return weights

@@ -25,7 +25,8 @@ static float max(float f1, float f2) {
  * @param arg output indexes corresponding to the argmax version of the gdt. Should be
  *            allocated to n elements prior to call.
  */
-void gdt1D(float *d, float *f, int n, float *df, int *arg, int offset) {
+void gdt1D(float *d, float *f, int n, float *df, int *arg, int offset, 
+	   double range) {
   /*
    * Please refer to Felzenszwalb, Huttenlocher, 2004 for a detailed
    * pseudo code of the algorithm - which the code mirrors, except for
@@ -35,9 +36,11 @@ void gdt1D(float *d, float *f, int n, float *df, int *arg, int offset) {
   int v[n];
   float z[n * 2];
   float s;
+  float unbs;
   int qmvk;
   int q;
   int vk, fvk, fq;
+  float eps = 10E-5;
   v[0] = 0;
   z[0] = -FLT_MAX;
   z[1] = FLT_MAX;
@@ -46,11 +49,20 @@ void gdt1D(float *d, float *f, int n, float *df, int *arg, int offset) {
     /* Intersection s generalized to arbitrary parabolas (d[1] nonnegative). 
      * Follows from elementary algebra.
      */
-  inter: vk = v[k];
+  inter: 
+    /*
+     * From the source code by Girshick, bounding the distance function
+     * into a range - deals with the case where a=b=0 I guess. Real ugly
+     * though, it looks like it's always going to converge to that.
+     */
+    vk = v[k];
     fvk = f[vk];
     fq = f[q];
-    s = (d[0] * (vk - q) + d[1] * (q*q - vk*vk) + fq - fvk)
+    
+    unbs = (d[0] * (vk - q) + d[1] * (q*q - vk*vk) + fq - fvk)
       / (2*d[1]*(q - v[k]));
+    s = min(v[k]+range+eps, max(q-range-eps,unbs));
+
     if (s <= z[k]) {
       k--;
       goto inter;
@@ -124,7 +136,7 @@ void tran(void *src, void *dst, const int N, const int M, size_t coeffsize) {
  *             row-major matrix.
  */
 void gdt2D(float *d, float *f, int rows, int cols,
-	   float *df, int *argi, int *argj) {
+	   float *df, int *argi, int *argj, int range) {
   // apply the 1D algorithm on each row
   int i;
   int j;
@@ -141,7 +153,8 @@ void gdt2D(float *d, float *f, int rows, int cols,
 
   for (i = 0; i < rows; i++) {
     offset = toRowMajor(i,0,cols);
-    gdt1D(dy, f + offset, cols, df + offset, flatarg1 + offset, offset);
+    gdt1D(dy, f + offset, cols, df + offset, flatarg1 + offset, offset,
+	  range);
   }
 
   // then on each column of the result. For this we transpose it, for memory locality.
@@ -149,7 +162,8 @@ void gdt2D(float *d, float *f, int rows, int cols,
   
   for (i = 0; i < cols; i++) {
     offset = toRowMajor(i, 0, rows);
-    gdt1D(dx, df2 + offset, rows, df3 + offset, flatarg2 + offset, offset);
+    gdt1D(dx, df2 + offset, rows, df3 + offset, flatarg2 + offset, offset,
+	  range);
   }
 
   // transpose the result again

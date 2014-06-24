@@ -22,7 +22,6 @@ def shift(array, vector):
        zeros. Vector can have negative components.
     """
     rows, cols = array.shape
-    assert abs(vector[1]) < rows and abs(vector[0]) < cols
     # shift the data
     shifted = np.roll(np.roll(array, vector[1], 0), vector[0], 1)
     # pad with zeros
@@ -61,6 +60,44 @@ def filter_response(featmap, linfilter):
                              linfilter.astype(np.float32), 
                              cv2.TM_CCORR)
 
+def part_resp_pad(comp):
+    """ Computes the amount of padding necessary for parts matching with
+        a specific DPM.
+
+    Arguments:
+        featmap    feature map to pad.
+        comp       DPM to match on the feature map.
+
+    Returns:
+        (pl, pr, pt, pb) where pl, pr, pt and pb are the amount of padding 
+        on the left, right, top and bottom respectively.
+    """
+    pl = 0
+    pr = 0
+    pt = 0
+    pb = 0
+
+    for i in range(len(comp.parts)):
+        hsize = np.array(comp.parts[i].shape[0:2], np.int32)//2
+        anchor = comp.anchors[i]
+        pl = min(pl, anchor[1] - hsize[1])
+        pr = max(pr, anchor[1] + hsize[1])
+        pt = min(pt, anchor[0] - hsize[0])
+        pb = max(pb, anchor[0] + hsize[0])
+
+    pl = -pl
+    pt = -pt
+
+    # More padding doesn't really hurt (except in memory usage,
+    # which we have plenty of anyway) so we add 1 to avoid any
+    # off-by-one error somewhere.
+    pl += 1
+    pr += 1
+    pt += 1
+    pb += 1
+
+    return (pl, pr, pt, pb)
+
 def dpm_matching(pyramid, dpmmodel, comp):
     """ Computes the matching of a DPM (non mixture nodel) on a
         feature pyramid.
@@ -85,8 +122,18 @@ def dpm_matching(pyramid, dpmmodel, comp):
     # already know where the root is thanks to the bounding box, setting
     # it as a latent value seems to introduce more noise than signal.
     rootresponse = np.vdot(pyramid.rootfeatures[comp], dpmmodel.root)
+    # Apply 0-padding to the parts feature map, so everything can be
+    # correctly matched. Keep track of the amount of padding.
+    pl, pr, pt, pb = part_resp_pad(dpmmodel)
+    ftrows, ftcols = pyramid.features[0].shape[0:2]
+    paddedfmap = np.pad(
+        pyramid.features[0],
+        [(pt,pb),(pl,pr),(0,0)],
+        mode='constant',
+        constant_values=[(0,0),(0,0),(0,0)]
+    )
     partresponses = map(lambda part:
-                        filter_response(pyramid.features[0], part),
+                        filter_response(paddedfmap, part),
                         dpmmodel.parts)
     # Apply distance transform to part responses.
     # The reason we do -gdt(d, -r) is because the gdt actually computes
@@ -98,8 +145,11 @@ def dpm_matching(pyramid, dpmmodel, comp):
 
     for i in range(0, len(dpmmodel.parts)):
         partresp = partresponses[i]
-        (df,args) = gdt.gdt2D(dpmmodel.deforms[i], -partresp)
-        gdtpartresp.append(-df) 
+        (df,args) = gdt.gdt2D(dpmmodel.deforms[i], -partresponses[i])
+        # we only care about the GDT'd response for the center part, so
+        # we remove the padding
+        gdtpartresp.append(-df[pt:pt+ftrows,pl:pl+ftcols])
+        # but we care about the args indexes with padding
         displacemaps.append(args)
     # shift the part maps by the relative anchor position
     shiftedparts = []
@@ -115,7 +165,7 @@ def dpm_matching(pyramid, dpmmodel, comp):
 
     # Compute the score as the maximum value in the score map. No root
     # position necessary, just part displacements.
-    return (scoremap.max(), displacemaps)
+    return (scoremap.max(), displacemaps, pl, pt, paddedfmap)
 
 def mixture_matching(pyramid, mixture):
     """ Matches a mixture model against a feature pyramid, and computes
@@ -136,21 +186,38 @@ def mixture_matching(pyramid, mixture):
     # scoring one's root position and part respnses.
     for i in range(0, len(mixture.dpms)):
         comp = mixture.dpms[i]
-        score, displacemaps = dpm_matching(pyramid, comp, i)
+        score, displacemaps, pl, pt, paddedfmap = (
+            dpm_matching(pyramid, comp, i)
+        )
         if bestcomp == None or bestcomp[0] < score:
-            bestcomp = (score, comp, displacemaps, i)
+            bestcomp = (score, comp, displacemaps, pl, pt, paddedfmap, i)
     
     # Compute optimal displacements for each part . Also compute the 
     # latent vector size while we're at it.
     absolutepos = []
     displacements = []
-    score, comp, displacemaps, c = bestcomp
+    score, comp, displacemaps, pl, pt, paddedfmap, c = bestcomp
     # initialize at root filter size + deformations + bias
     latvecsize = comp.root.size + 4 * (len(comp.parts)) + 1
 
     for i in range(0, len(comp.parts)):
-        ancj, anci = comp.anchors[i]
+        # computing displacements: the displacement maps are
+        # padded by pl on the left and pt on the top, so careful
+        # with that one.
+        # anchors are specified as upper-left point, but responses
+        # correspond to the center of the filter. So we shift it
+        # by half the filter size.
+        ancj, anci = (
+            np.array([pl, pt], np.int32) + # padding
+            comp.anchors[i] + # anchor position
+            np.array(comp.parts[i].shape[0:2][::-1], np.int32)//2 # half size
+        )
+        # the absolute position is padded coordinates - needed for
+        # reconstructing the latent vector later on. It's also still
+        # coordinate for the center of the filter.
         absolutepos.append(displacemaps[i][anci, ancj])
+        # no need to take padding into account for the displacement
+        # itself, as we only care about the difference.
         displacements.append(
             np.array([anci,ancj], dtype=np.int32) -
             displacemaps[i][anci, ancj]
@@ -163,27 +230,31 @@ def mixture_matching(pyramid, mixture):
     offset = 0
     # add pyramid subwindows relative to each filter
     # root filter
-    rrows, rcols = comp.root.shape[0:2]
     latvec[0:comp.root.size] = pyramid.rootfeatures[c].flatten('C')
     offset = offset + comp.root.size;
-    # part filters
-    # first pad the 0 feature map with zeros using the largest
-    # part size.
-    if not (comp.parts == []):
-        rpad0 = np.amax(map(lambda p: p.shape[0], comp.parts))//2 + 1
-        cpad0 = np.amax(map(lambda p: p.shape[1], comp.parts))//2 + 1
-        
-        feat0pad = np.pad(pyramid.features[0],
-                          [(rpad0,rpad0), (cpad0, cpad0), (0,0)],
-                          mode='constant',
-                          constant_values=[(0,0),(0,0),(0,0)])
 
+    if not (comp.parts == []):
+        # part filters, being careful to take subwindow out of the
+        # well-padded feature map.
+        # Since deformations may put us out of bounds by a halfsize,
+        # we add that much more padding.
+        maxhsr = max(map(lambda p: p.shape[0], comp.parts))//2
+        maxhsc = max(map(lambda p: p.shape[1], comp.parts))//2
+        repaddedfmap = np.pad(
+            paddedfmap,
+            [(maxhsr,maxhsr),(maxhsc,maxhsc),(0,0)],
+            mode='constant',
+            constant_values=[(0,0),(0,0),(0,0)]
+        )
         for i in range(0, len(comp.parts)):
             part = comp.parts[i]
             prows, pcols = part.shape[0:2]
+            # absolutepos contains the absolute position of
+            # the center of the part, so we gotta be careful
+            # again
             uli, ulj = absolutepos[i]
-            subwindow = feat0pad[rpad0+uli:rpad0+uli+prows,
-                                 cpad0+ulj:cpad0+ulj+pcols]
+            subwindow = repaddedfmap[uli:uli+prows,
+                                     ulj:ulj+pcols]
             latvec[offset:offset+part.size] = subwindow.flatten('C')
             offset = offset + part.size
     

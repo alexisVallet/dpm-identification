@@ -71,7 +71,8 @@ def lsvmsgd(model, negatives, poslatents, C, verbose=False):
     return (dpm.vectortomixture(final, modelsize), 
             negcomps/negcomps.sum())
 
-def train(initmodel, positives, negatives, nbiter=4, C=0.01, verbose=False):
+def train(initmodel, positives, negatives, nbiter, C=0.01, 
+          verbose=False):
     """ Trains a mixture of deformable part models using a latent SVM.
 
     Arguments:
@@ -105,9 +106,10 @@ def train(initmodel, positives, negatives, nbiter=4, C=0.01, verbose=False):
         
         # Then optimize the model using stochastic gradient descent
         print "running gradient descent to optimize the mixture..."
-        (currentmodel, negcomps) = lsvmsgd(
+        (currentmodel_, negcomps) = lsvmsgd(
             currentmodel, negatives, poslatents, C,
             verbose=verbose)
+        currentmodel = currentmodel_
         if verbose:
             poscomps /= len(positives)
             print ("positive component matches: " + 
