@@ -2,6 +2,7 @@
 """
 import numpy as np
 import cv2
+import features as feat
 
 class DPM:
     def __init__(self, root, parts, anchors, deforms, bias):
@@ -65,6 +66,12 @@ class DPM:
                 and allpairsclose(self.deforms, other.deforms)
                 and self.bias == other.bias)
 
+    def toimages(self, featvis):
+        """ Returns images for the root and for each part.
+        """
+        return map(lambda fmap: feat.visualize_featmap(fmap, featvis), 
+                   [self.root] + self.parts)
+
     def __repr__(self):
         return repr(self.size())                    
 
@@ -116,6 +123,9 @@ class Mixture:
         return reduce(lambda b1, b2: b1 and b2,
                       map(lambda comps: comps[0] == comps[1],
                           zip(self.dpms, other.dpms)), True)
+
+    def toimages(self, featvis):
+        return map(lambda m: m.toimages(featvis), self.dpms)
 
     def __repr__(self):
         return repr(self.size())

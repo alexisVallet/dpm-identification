@@ -10,6 +10,7 @@ import featpyramid as pyr
 import features as feat
 import matching
 import sgd
+import matplotlib.pyplot as plt
 
 def lsvmsgd(model, negatives, poslatents, C, verbose=False):
     """ Latent svm stochastic gradient descent for optimizing the model
@@ -34,6 +35,35 @@ def lsvmsgd(model, negatives, poslatents, C, verbose=False):
     init = model.tovector()
     # keeping track of percentages of matching for each component
     negcomps = np.zeros([len(model.dpms)], np.float32)
+    # keep track of cost at each epoch
+    costs = []
+    # keep track of latent vector features
+    feats = np.empty([nb_samples, modelsize.vectorsize()])
+    allidxs = np.zeros([nb_samples], np.bool)
+
+    # cost function computation closure
+    def cost(weights):
+        innersum = 0
+        mixture = dpm.vectortomixture(weights, modelsize)
+        
+        # compute hinge loss for each training example
+        for i in range(poslatents.shape[1]):
+            score = np.vdot(weights, poslatents[:,i])
+            hingeloss = max(0, 1 - score)
+            innersum += hingeloss
+        for neg in negatives:
+            # find the best latent vector with the
+            # matching algorithm
+            (score_, compidx, latvec) = matching.mixture_matching(
+                neg,
+                mixture
+            )
+            score = np.vdot(weights, latvec)
+            hingeloss = max(0, 1 + score)
+            innersum += hingeloss
+        cost = 0.5*np.linalg.norm(weights)**2 + C * innersum
+        costs.append(cost)
+        return cost
 
     # gradient computation closure
     def gradient(weights, i):
@@ -56,6 +86,9 @@ def lsvmsgd(model, negatives, poslatents, C, verbose=False):
             # keep track of negative matchings
             negcomps[compidx] += 1
             latvec = latvec_
+        # keep track of feature scales
+        feats[i] = latvec
+        allidxs[i] = True
         fb = np.vdot(weights, latvec)
         hi = None
         if yi * fb >= 1:
@@ -63,10 +96,26 @@ def lsvmsgd(model, negatives, poslatents, C, verbose=False):
         else:
             hi = -yi * latvec
         return weights + C * float(nb_samples) * hi
-    
+
+    def epochend():
+        assert np.all(allidxs)
+        # print stats about latent vectors
+        # compute the mean and variance for each feature
+        means = np.mean(feats, 1)
+        variances = np.var(feats, 1)
+        print "average feature mean: " + repr(np.mean(means))
+        print "average feature variance: " + repr(np.mean(variances))
+        print "variance in feature mean: " + repr(np.var(means))
+        print "variance in feature variance: " + repr(np.var(variances))
     # run stochastic gradient descent
-    final = sgd.sgd(nb_samples, init, gradient, verbose=verbose)
-    
+    final = sgd.sgd(nb_samples, init, gradient, verbose=verbose, 
+                    costfunction=cost, 
+                    atepochend=epochend if verbose else None)
+
+    if verbose:
+        # plot cost values across
+        plt.plot(costs)
+        plt.show()
     # return the corresponding model
     return (dpm.vectortomixture(final, modelsize), 
             negcomps/negcomps.sum())
@@ -89,13 +138,14 @@ def train(initmodel, positives, negatives, nbiter, C=0.01,
         model, optimized to classify positive and negative samples 
         correctly.
     """
-    currentmodel = initmodel
     vectorsize = initmodel.size().vectorsize()
+    currentmodel = initmodel
 
     for t in range(0,nbiter):
         # First, compute the best latent values for each positive sample
         # using the matching algorithm
-        print "computing latent values for positive samples..."
+        if verbose:
+            print "computing latent values for positive samples..."
         poslatents = np.zeros([vectorsize, len(positives)])
         poscomps = np.zeros([len(currentmodel.dpms)], np.float32)
         for pi in range(0, len(positives)):
@@ -105,7 +155,8 @@ def train(initmodel, positives, negatives, nbiter, C=0.01,
             poscomps[c] += 1
         
         # Then optimize the model using stochastic gradient descent
-        print "running gradient descent to optimize the mixture..."
+        if verbose:
+            print "running gradient descent to optimize the mixture..."
         (currentmodel_, negcomps) = lsvmsgd(
             currentmodel, negatives, poslatents, C,
             verbose=verbose)

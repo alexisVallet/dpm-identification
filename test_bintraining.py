@@ -5,12 +5,11 @@ import cv2
 import numpy as np
 import os
 import json
-import multiprocessing as mp
 
-import multitraining as mtrain
+import bintraining as btrain
 import features as feat
 
-class TestMultiTraining(unittest.TestCase):
+class TestBinaryTraining(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """ Loads the entire training data.
@@ -67,33 +66,31 @@ class TestMultiTraining(unittest.TestCase):
                 charbgrimg = bgrimg[y1:y2,x1:x2]
                 
                 cls.images[cname].append(charbgrimg)
-
-    def test_multi_train(self):
+        
+    def test_binary_train(self):
+        # params
+        nbbins = (4,4,4)
+        feature = feat.bgrhistogram(nbbins)
+        featdim = np.prod(nbbins)
         mindimdiv = 7
-        C = 0.01
-        models = mtrain.multi_train(
-            self.images,
+        # set up training data
+        cname = 'asuka_langley'
+        positives = self.images[cname]
+        negatives = []
+
+        for othername in self.images:
+            if othername != cname:
+                negatives += self.images[othername]
+        
+        model = btrain.binary_train(
+            positives,
+            negatives,
+            feature,
+            featdim,
             mindimdiv,
-            C=C,
-            verbosity=1
+            C=0.1,
+            verbose=True
         )
-        featvis = feat.bgrhistvis((4,4,4))
-        # display the models
-        for label in models:
-            print "Displaying model for " + label
-            mvis = models[label].toimages(featvis)
-            ci = 0
-            for compvis in mvis:
-                pi = 0
-                for partvis in compvis:
-                    winname = "part " + repr(pi) + " of root " + repr(ci) 
-                    cv2.namedWindow(winname, cv2.WINDOW_NORMAL)
-                    cv2.imshow(winname, partvis)
-                    pi += 1
-                ci += 1
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     unittest.main()
-    

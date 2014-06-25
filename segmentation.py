@@ -30,7 +30,7 @@ cfelzseg.argtypes = [
     ctypes.c_int
 ]
 
-def felzenszwalb_segment(featmap, k=None, mincmpsize=0, maxcmpsize = 0.9,
+def felzenszwalb_segment(featmap, k=None, mincmpsize=0, maxcmpsize = 0.8,
                          scaletype='CARDINALITY'):
     """ Run a modified version of Felzenszwalb's algorithm designed for
         feature maps. Internally, uses the correlation distance as the
