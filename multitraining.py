@@ -24,10 +24,7 @@ def runbintrain(arguments):
     """ Runs training for a single class label.
     """
     # because multiprocessing sucks balls
-    label, mindimdiv, nb_parts, C, verbosity = arguments
-    nbbins = (4,4,4)
-    feature = feat.bgrhistogram(nbbins)
-    featdim = np.prod(nbbins)
+    label, feature, featparams, featdim, mindimdiv, nb_parts, C, verbosity = arguments
 
     if verbosity > 0:
         print "running training for " + repr(label) + "..."
@@ -35,15 +32,18 @@ def runbintrain(arguments):
     negatives = reduce(lambda l1, l2: l1 + l2,
                        map(lambda k: global_traindata[k],
                            [k for k in global_traindata if k != label]))
-    model = btrain.binary_train(positives, negatives, feature, featdim,
-                                nb_parts, mindimdiv, C, verbosity > 1)
+    binmodel = btrain.binary_train(positives, negatives, feature, featparams,
+                                   featdim, nb_parts, mindimdiv, C, 
+                                   verbosity > 1)
     if verbosity > 0:
         print "finished training for " + repr(label)
 
-    return model
+    return binmodel
 
-def multi_train(traindata, nb_parts=6, mindimdiv=10, C=0.01, 
-                verbosity=0, nb_cores=None):
+def multi_train(traindata, feature=model.Feature.bgrhistogram,
+                featparams=(4,4,4), featdim=64,
+                nb_parts=6, mindimdiv=10, C=0.01, verbosity=0, 
+                nb_cores=None):
     """ Trains a model for multi-class classification using deformable
         parts models. In practice, trains n binary classifiers in a one vs
         all fashion in parallel.
@@ -75,13 +75,11 @@ def multi_train(traindata, nb_parts=6, mindimdiv=10, C=0.01,
     labels = [k for k in traindata]
 
     # run each batch on its own process
-    arguments = map(lambda k: (k, mindimdiv, nb_parts, C, verbosity),
+    arguments = map(lambda k: (k, feature, featparams, featdim, mindimdiv, nb_parts, C, verbosity),
                     labels)
-    binmodel = pool.map(runbintrain, arguments)
+    binmodels = pool.map(runbintrain, arguments)
 
-    return model.MultiModel(
-        labels,
-        mixtures,
+    return model.MultiModel(binmodels)
         
 
 def train_and_save(outfile, traindata, nb_parts=4, mindimdiv=7, C=0.01, 

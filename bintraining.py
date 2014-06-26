@@ -1,8 +1,10 @@
 import initmodel as init
 import training as train
+import model
+import calibration
 
-def binary_train(positives, negatives, feature, featdim, nb_parts,
-                 mindimdiv, C=0.01, verbose=False):
+def binary_train(positives, negatives, feature, featparams, 
+                 featdim, nb_parts, mindimdiv, C=0.01, verbose=False):
     """ Full training procedure for the binary classification
         case, including initialization and LSVM training.
 
@@ -19,10 +21,10 @@ def binary_train(positives, negatives, feature, featdim, nb_parts,
     """
     # initialize the mixture model, and get the feature pyramids
     # as a byproduct.
-    initmodel, pospyr, negpyr = init.initialize_model(
+    initmixture, pospyr, negpyr = init.initialize_model(
         positives,
         negatives,
-        feature,
+        featurefunc(feature)(featparams),
         featdim,
         nb_parts,
         mindimdiv=mindimdiv,
@@ -31,8 +33,8 @@ def binary_train(positives, negatives, feature, featdim, nb_parts,
     )
     
     # run the training procedure on the initial model
-    trainedmodel = train.train(
-        initmodel,
+    trainedmixture = train.train(
+        initmixture,
         pospyr,
         negpyr,
         nbiter=4,
@@ -40,5 +42,19 @@ def binary_train(positives, negatives, feature, featdim, nb_parts,
         verbose=verbose
     )
 
+    # train the calibrator
+    calibrator = calibration.train_calibrator(
+        trainedmixture,
+        pospyr,
+        negpyr
+    )
+
     # return the model
-    return trainedmodel
+    return model.BinaryModel(
+        trainedmixture,
+        calibrator,
+        feature,
+        featparams,
+        featdim,
+        mindimdiv
+    )
