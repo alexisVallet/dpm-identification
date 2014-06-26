@@ -1,7 +1,7 @@
 import initmodel as init
 import training as train
 
-def binary_train(positives, negatives, feature, featdim,
+def binary_train(positives, negatives, feature, featdim, nb_parts,
                  mindimdiv, C=0.01, verbose=False):
     """ Full training procedure for the binary classification
         case, including initialization and LSVM training.
@@ -24,6 +24,7 @@ def binary_train(positives, negatives, feature, featdim,
         negatives,
         feature,
         featdim,
+        nb_parts,
         mindimdiv=mindimdiv,
         C=C,
         verbose=verbose

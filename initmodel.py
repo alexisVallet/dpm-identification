@@ -113,17 +113,59 @@ def cluster_comps(positives, redfeat):
     clustering = sklcluster.DBSCAN(metric=correlation_distance)
     complabels = np.round(clustering.fit_predict(redfeat)).astype(np.int32)
     mincomplabel = complabels.min()
-    nbcomps = complabels.max() - mincomplabel
+    nbcomps = complabels.max() - mincomplabel + 1
     components = []
-    for i in range(0,nbcomps):
+    
+    for i in range(nbcomps):
         components.append([])
     
+    # noisy samples will be labeled -1. We'll put them into their
+    # own component. So if mincomplabel is negative, then we have
+    # noisy samples.
     for i in range(0,len(positives)):
-        components[complabels[i]].append(positives[i])
+        label = complabels[i] - mincomplabel
+        components[label].append(positives[i])
 
     return components
 
-def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01, verbose=False):
+def init_parts(featmap, nb_parts):
+    # set the part size to half the minimum dimension of the
+    # feature map
+    rows, cols = featmap.shape[0:2]
+    partsize = min(rows, cols) // 2
+    # compute an energy map of the feature map
+    energy = np.empty([rows - partsize, cols - partsize])
+    fmapcopy = np.array(featmap, copy=True)
+    # then place anchors on each maximum energy point greedily
+    partsandanc = []
+
+    for p in range(nb_parts):
+        # compute energy map
+        for i in range(rows - partsize):
+            for j in range(cols - partsize):
+                subwin = fmapcopy[i:i+partsize,j:j+partsize]
+                subwin[subwin < 0] = 0
+                energy[i,j] = np.vdot(subwin,subwin)
+        # get the max
+        anci, ancj = np.unravel_index(
+            np.argmax(energy),
+            energy.shape
+        )
+        part = featmap[anci:anci+partsize,
+                       ancj:ancj+partsize]
+        # set the window area to 0 for next part
+        fmapcopy[anci:anci+partsize,
+                 ancj:ancj+partsize] = 0
+        partsandanc.append((
+            np.array((ancj,anci), np.int32),
+            part
+        ))
+
+    return partsandanc
+        
+
+def initialize_model(positives, negatives, feature, featdim, nb_parts,
+                     mindimdiv=7, C=0.01, verbose=False):
     """ Initialize a mixture model for a given class. Uses dimensionality
         reduction and clustering to guess the components. Uses 
         segmentation to guess the parts. So there is no need to specify 
@@ -183,8 +225,7 @@ def initialize_model(positives, negatives, feature, featdim, mindimdiv=7, C=0.01
     for model in newmixture.dpms:
         interpolated = cv2.resize(model.root, None, fx=2, fy=2,
                                   interpolation=cv2.INTER_LINEAR)
-        partsandanc = seg.felzenszwalb_segment(interpolated)
-        
+        partsandanc = init_parts(interpolated, nb_parts)
         if verbose:
             print ("found " + repr(len(partsandanc)) 
                    + " parts for root " + repr(i))
