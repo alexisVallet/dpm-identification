@@ -13,18 +13,26 @@ import RemoteException
 import features as feat
 import bintraining as btrain
 import ioutils as io
+import model
 
 # awful, awful hack to avoid the training data to be copied
 # in an extremely inefficient manner (pickling) for each
 # worker thread.
 global_traindata = None
 
+cache_folder = os.path.join('data', 'dpmid-cache')
+
 @RemoteException.showError
 def runbintrain(arguments):
     """ Runs training for a single class label.
     """
     # because multiprocessing sucks balls
-    label, feature, featparams, featdim, mindimdiv, nb_parts, C, verbosity = arguments
+    label, feature, featparams, featdim, mindimdiv, nb_parts, C, verbosity, modelname = arguments
+
+    # check the cache
+    cachefilename = os.path.join(cache_folder, modelname + '_' + label)
+    if os.path.isfile(cachefilename):
+        return load_model(cachefilename)
 
     if verbosity > 0:
         print "running training for " + repr(label) + "..."
@@ -32,18 +40,23 @@ def runbintrain(arguments):
     negatives = reduce(lambda l1, l2: l1 + l2,
                        map(lambda k: global_traindata[k],
                            [k for k in global_traindata if k != label]))
-    binmodel = btrain.binary_train(positives, negatives, feature, featparams,
+    binmodel = btrain.binary_train(positives, negatives, feature, 
+                                   featparams,
                                    featdim, nb_parts, mindimdiv, C, 
                                    verbosity > 1)
     if verbosity > 0:
         print "finished training for " + repr(label)
 
+    # cache the results
+    outfile = open(cachefilename, 'w')
+    pickle.dump(binmodel, outfile)
+    outfile.close()
+
     return binmodel
 
-def multi_train(traindata, feature=model.Feature.bgrhistogram,
-                featparams=(4,4,4), featdim=64,
+def multi_train(traindata, feature, featparams, featdim,
                 nb_parts=6, mindimdiv=10, C=0.01, verbosity=0, 
-                nb_cores=None):
+                nb_cores=None, modelname=''):
     """ Trains a model for multi-class classification using deformable
         parts models. In practice, trains n binary classifiers in a one vs
         all fashion in parallel.
@@ -73,25 +86,33 @@ def multi_train(traindata, feature=model.Feature.bgrhistogram,
         nb_cores = mp.cpu_count()
     pool  = mp.Pool(processes=nb_cores)
     labels = [k for k in traindata]
+    feature = model.Feature.bgrhistogram
+    featparams = (4,4,4)
+    featdim = np.prod(featparams)
 
     # run each batch on its own process
-    arguments = map(lambda k: (k, feature, featparams, featdim, mindimdiv, nb_parts, C, verbosity),
+    arguments = map(lambda k: (k, feature, featparams, featdim, mindimdiv, nb_parts, C, verbosity, modelname),
                     labels)
     binmodels = pool.map(runbintrain, arguments)
 
     return model.MultiModel(binmodels)
-        
 
-def train_and_save(outfile, traindata, nb_parts=4, mindimdiv=7, C=0.01, 
-                   verbosity=0, nb_cores=None):
+
+def train_and_save(outfile, traindata, feature, featparams, featdim, 
+                   nb_parts=4, mindimdiv=7, C=0.01, verbosity=0, 
+                   nb_cores=None, modelname=''):
     # run training
     model = multi_train(
-        traindata, 
+        traindata,
+        feature,
+        featparams,
+        featdim,
         nb_parts=nb_parts,
         mindimdiv=mindimdiv,
         C=C,
         verbosity=verbosity,
-        nb_cores=nb_cores
+        nb_cores=nb_cores,
+        modelname=modelname
     )
     
     # write the model to a file

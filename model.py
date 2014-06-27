@@ -26,20 +26,19 @@ def featurefunc(feature):
 
     return feattofunc[feature]
 
+
 class BinaryModel:
     """ Model for a binary classifier.
     """
     def __init__(self, mixture, calibrator, feature, featparams,
                  featdim, mindimdiv):
         self.mixture = mixture
-        self.feature_ = feature
+        self.feature = feature
         self.featparams = featparams
         self.featdim = featdim
         self.mindimdiv = mindimdiv
         self.calibrator = calibrator
 
-    def feature(self):
-        return featurefunc(self.feature)(self.featparams)
 
 class MultiModel:
     """ Model for a multi-class classifier.
@@ -47,19 +46,5 @@ class MultiModel:
     def __init__(self, binmodels):
         # check that everything is in order
         assert len(binmodels) > 0
-        self.feature = None
-        self.featparams = None
-        self.featdim = None
-        for binmodel in binmodels:
-            if self.feature == None:
-                self.feature = binmodel.feature
-                self.featparams = binmodel.featparams
-                self.featdim = binmodel.featdim
-            else:
-                assert binmodel.feature == self.feature
-                assert binmodel.featparams == self.featparams
-                assert binmodel.featdim == self.featdim
         self.binmodels = binmodels
 
-    def feature(self):
-        return featurefunc(self.feature)(self.featparams)

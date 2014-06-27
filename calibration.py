@@ -26,19 +26,19 @@ def train_calibrator(model, pospyr, negpyr):
     nb_pos = len(pospyr)
     nb_neg = len(negpyr)
     nb_samples = nb_pos + nb_neg
-    scores = np.empty([nb_samples], np.float64)
+    scores = np.empty([nb_samples, 1], np.float64)
     labels = np.empty([nb_samples], np.float64)
     modelvec = model.tovector()
     
     i = 0
     for pos in pospyr:
         (score_, c, latvec) = matching.mixture_matching(pos, model)
-        scores[i] = np.vdot(modelvec, latvec)
+        scores[i,0] = np.vdot(modelvec, latvec)
         labels[i] = 1
         i = i + 1
     for neg in negpyr:
         (score_, c, latvec) = matching.mixture_matching(neg, model)
-        scores[i] = np.vdot(modelvec, latvec)
+        scores[i,0] = np.vdot(modelvec, latvec)
         labels[i] = -1
         i = i + 1
 

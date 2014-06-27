@@ -24,14 +24,14 @@ def binary_train(positives, negatives, feature, featparams,
     initmixture, pospyr, negpyr = init.initialize_model(
         positives,
         negatives,
-        featurefunc(feature)(featparams),
+        model.featurefunc(feature)(featparams),
         featdim,
         nb_parts,
         mindimdiv=mindimdiv,
         C=C,
         verbose=verbose
     )
-    
+
     # run the training procedure on the initial model
     trainedmixture = train.train(
         initmixture,

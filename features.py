@@ -145,7 +145,8 @@ def histvis(bounds, hist_):
                 featcolor = featcolor + (hist[li,ai,bi] * bincolor)
                 sumbins += hist[li,ai,bi]
 
-    featcolor /= sumbins
+    if sumbins != 0:
+        featcolor /= sumbins
 
     # return a single pixel image (will be resized by the vizualisation
     # procedure for a full feature map)

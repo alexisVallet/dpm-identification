@@ -199,8 +199,8 @@ def initialize_model(positives, negatives, feature, featdim, nb_parts,
     # for each cluster, compute a root
     roots = []
     i = 0
-    for positives in comps:
-        root = train_root(positives, negatives,
+    for pos in comps:
+        root = train_root(pos, negatives,
                           mindimdiv, feature, featdim)
         roots.append(root)
     # combine them into a part-less mixture, run the full LSVM

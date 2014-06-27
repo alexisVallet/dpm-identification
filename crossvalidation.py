@@ -1,15 +1,17 @@
 """ Runs cross validation for DPM identification
 """
-import multitraining as mtrain
-import ioutils as io
 import os
 import time
-
 import numpy as np
 import cv2
 import sys
 
-def train_cv(k, cvroot, bbfolder, outfolder, verbose=True):
+import multitraining as mtrain
+import ioutils as io
+import model
+
+def train_cv(k, feature, featparams, featdim, cvroot, bbfolder, 
+             outfolder, verbose=True):
     """ Trains models for k-fold cross validation, given specific
         bounding boxes for training. Sequentially train each fold
         in parallel, write each model to the disk as it goes. Checks
@@ -29,9 +31,9 @@ def train_cv(k, cvroot, bbfolder, outfolder, verbose=True):
         if verbose:
             print "Training for fold " + repr(fold)
         # if the model file exists, skip
-        outname = 'model_' + repr(fold)
+        outname = os.path.join(outfolder, 'model_' + repr(fold))
         if os.path.isfile(outname):
-            continue;
+            continue
         traindata = {}
         # get the training data from all the other folds
         for otherfold in [f for f in range(k) if f != fold]:
@@ -46,16 +48,23 @@ def train_cv(k, cvroot, bbfolder, outfolder, verbose=True):
                     traindata[label] += folddata[label]
         if verbose:
             print "Training for labels:"
-            print [k for k in traindata]
-            for k in traindata:
-                print k + " has " + repr(len(traindata[k])) + " training samples"
+            print [label for label in traindata]
+            total = 0
+            for label in traindata:
+                total += len(traindata[label])
+                print label + " has " + repr(len(traindata[label])) + " training samples"
+            print "total " + repr(total) + " samples"
 
         # run the multi training algorithm
         starttime = time.clock()
         mtrain.train_and_save(
-            os.path.join(outfolder, outname),
+            outname,
             traindata,
-            verbosity=1 if verbose else 0
+            feature,
+            featparams,
+            featdim,
+            verbosity=1 if verbose else 0,
+            modelname='fold_' + repr(fold)
         )
         endtime = time.clock()
         elapsed = endtime - starttime
@@ -72,4 +81,8 @@ if __name__ == "__main__":
     assert os.path.isdir(cvroot)
     assert os.path.isdir(bbfolder)
     assert os.path.isdir(outfolder)
-    train_cv(k, cvroot, bbfolder, outfolder, verbose=True)
+    feature = model.Feature.labhistogram
+    featparams = (4,4,4)
+    featdim = np.prod(featparams)
+    train_cv(k, feature, featparams, featdim, cvroot, bbfolder, outfolder,
+             verbose=True)
