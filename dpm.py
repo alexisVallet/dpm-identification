@@ -2,7 +2,6 @@
 """
 import numpy as np
 import cv2
-import features as feat
 
 class DPM:
     def __init__(self, root, parts, anchors, deforms, bias):
@@ -186,16 +185,3 @@ def vectortomixture(vector, mixturesize):
                                 dpmsize))
         offset = offset + subvecsize
     return Mixture(dpms)
-
-def comp_latent_to_mixture(vector, mixturesize, compidx, outsize):
-    """ Embeds a latent vector from a non-mixture DPM into a mixture
-        vector.
-    """
-    offset = 0
-    
-    for c in range(0,compidx):
-        offset = offset + mixturesize.dpmsizes[i].vectorsize()
-    mixturevec = np.zeros([outsize])
-    compsize = mixturesize.dpmsizes[compidx].vectorsize()
-    mixturevec[offset:offset+compsize] = vector
-    return mixturevec

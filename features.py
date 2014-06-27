@@ -3,9 +3,40 @@
 import cv2
 import numpy as np
 
-def compute_featmap(image, n, m, feature, featdim):
+class Feature:
+    """ Picklable feature class, encapsulating all the necessary
+        information to build feature maps from an image.
+    """
+    _featnames = [
+        'labhist', # L*a*b* color histogram
+        'bgrhist'  # BGR color histogram
+    ]
+
+    def __init__(self, featname, mindimdiv, dimension, params):
+        self.featname = featname
+        self.dimension = dimension
+        self.params = params
+
+    def __call__(self, image):
+        _featfuncs = {
+            'labhist': labhistogram,
+            'bgrhist': bgrhistogram
+        }
+        return _featfuncs[self.featname](self.params)(image)
+
+    def visualize(self, featvector):
+        _visfuncs = {
+            'labhist': labhistvis,
+            'bgrhist': bgrhistvis,
+        }
+        return _visfuncs[self.featname](self.params)(featvector)
+
+    def __repr__(self):
+        return "%s(%r)" % (self.__class__, self.__dict__)
+
+def compute_featmap(image, n, m, feature):
     height, width = image.shape[0:2]
-    featuremap = np.empty([n, m, featdim])
+    featuremap = np.empty([n, m, feature.featdim])
     # We cut up the image into an m by n grid. To avoir rounding errors, we
     # first compute the points of the grid, then iterate over them.
     rowindexes = np.round(np.linspace(0, height, num=n+1)).astype(np.int32)
@@ -42,7 +73,7 @@ def regular_grid(image, mindimdiv):
 
     return [m,n] if rotated else [n,m]
 
-def compute_regular_featmap(image, mindimdiv, feature, featdim):
+def compute_regular_featmap(image, feature, mindimdiv):
     # Compute the features for each layer. A feature is represented as a 3d
     # numpy array with dimensions w*h*featdim where w and h are the width and
     # height of the input downsampled image.        
