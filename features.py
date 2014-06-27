@@ -12,7 +12,7 @@ class Feature:
         'bgrhist'  # BGR color histogram
     ]
 
-    def __init__(self, featname, mindimdiv, dimension, params):
+    def __init__(self, featname, dimension, params):
         self.featname = featname
         self.dimension = dimension
         self.params = params
@@ -36,7 +36,7 @@ class Feature:
 
 def compute_featmap(image, n, m, feature):
     height, width = image.shape[0:2]
-    featuremap = np.empty([n, m, feature.featdim])
+    featuremap = np.empty([n, m, feature.dimension])
     # We cut up the image into an m by n grid. To avoir rounding errors, we
     # first compute the points of the grid, then iterate over them.
     rowindexes = np.round(np.linspace(0, height, num=n+1)).astype(np.int32)
@@ -80,7 +80,7 @@ def compute_regular_featmap(image, feature, mindimdiv):
     # First compute the feature map for the full-resolution layer
     [n,m] = regular_grid(image, mindimdiv)
 
-    featuremap = compute_featmap(image, n, m, feature, featdim)
+    featuremap = compute_featmap(image, n, m, feature)
 
     return featuremap
 
