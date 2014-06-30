@@ -5,15 +5,17 @@ import cv2
 
 from gdt import gdt2D
 
-def match_filter(fmap, linfilter):
+def match_filter(fmap, linfilter, return_padded=False):
     """ Returns the response map of a linear filter on a feature map.
         Inputs should hold 32 bits floating point coefficients for
         best performance. Will be converted if necessary.
     
     Arguments:
-        fmap    n by m by f 3 dimensional numpy array.
-        filter  n' by m' by f 3 dimensional numpy array, where
-                n' <= n and m' <= m.
+        fmap             n by m by f 3 dimensional numpy array.
+        filter           n' by m' by f 3 dimensional numpy array, where
+                         n' <= n and m' <= m.
+        return_center    set to True if you also want the function to return
+                         the coordinates of the center of the linear filter.
     Returns:
         n by m 2 dimensional numpy array, where each pixel corresponds
         to the response of the filter when its center is positioned on
@@ -36,11 +38,14 @@ def match_filter(fmap, linfilter):
     )
     
     # Run cross correlation of the filter on the padded map.
-    return cv2.matchTemplate(
+    response = cv2.matchTemplate(
         paddedfmap,
         linfilter_,
         method=cv2.TM_CCORR
     )
+    if return_padded:
+        return (response, paddedfmap)
+    return response
 
 def match_part(fmap, partfilter, anchor, deform):
     """ Matches a DPM part against a feature map.

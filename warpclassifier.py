@@ -69,7 +69,11 @@ class WarpClassifier:
         # Train a logistic regression on this data.
         self.logregr = LogisticRegression(C=self.C)
         self.logregr.fit(X, y)
-    
+        # Save the (well shaped) feature map infered by logistic regression.
+        self.model_featmap = self.logregr.coef_.reshape(
+            (self.nbrowfeat, self.nbcolfeat, self.feature.dimension)
+        )
+
     def predict_proba(self, images):
         """ Predicts the probability of images to be classified as
             positive by our classifier.

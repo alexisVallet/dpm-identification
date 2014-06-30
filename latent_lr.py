@@ -1,7 +1,7 @@
 """ Generic binary latent logistic regression classifier.
 """
 import numpy as np
-from scipy.optimize import 
+from scipy.optimize import fmin_cg
 
 class BinaryLLR:
     def __init__(self, latent_function, C, verbose=False):
@@ -15,43 +15,43 @@ class BinaryLLR:
                                phi(x, z) for all possible latent values
                                z. Formally:
                   latent_function(beta, x) = argmax_z (beta . phi(x, z))
-                               Where beta is a nb_feature dimensional
-                               model vector, and x is a nb_feature 
-                               dimensional training sample. Should return 
-                               an nb_feature dimensional latent vector.
+                               Where beta is an arbitrary dimensional 
+                               model vector, and x is a nb_features dimensional
+                               vector. Should return an nb_feature dimensional 
+                    latent vector.
             C                  soft margin parameter.
         """
         self.latent_function = latent_function
         self.C = C
         self.verbose = verbose
 
-    def cost_function(self, X, poslatents, model):
+    def cost_function(self, negatives, poslatents, model):
         """ Computes the logistic cost function. Runs in
             time O(p + n * l) where l is the the runtime of
             the latent vector function, p is the number of
             positive samples and n is the number of negative samples.
         
         Arguments:
-            X          samples to compute the cost function on,
-                       ordered with positive samples at the beginning.
+            negatives  negative samples to compute the cost function on.
             poslatents matrix of latent vectors as rows for positive
-                      samples.
-            model     model vector to compute the cost for.
+                       samples.
+            model      model vector to compute the cost for.
         """
-        nb_samples, nb_featuresp1 = X.shape
         nb_pos = poslatents.shape[0]
+        nb_samples = nb_pos + len(negatives)
+        nb_featuresp1 = model.size
         innersum = 0
 
         # Add up logistic loss for positive samples.
         for i in range(nb_pos):
-            innersum += np.log(1 + np.exp(-np.vdot(model, X[i,:])))
+            innersum += np.log(1 + np.exp(-np.vdot(model, poslatents[i,:])))
         # Compute latent value and add up logistic loss for negative
         # samples.
         biaslessmodel = model[1:nb_featuresp1]
-        for i in range(nb_pos, nb_samples):
+        for i in range(len(negatives)):
             latvec = self.latent_function(
                 biaslessmodel, 
-                X[i,1:nb_features]
+                negatives[i]
             )
             modellatdot = (
                 np.vdot(latvec, biaslessmodel) 
@@ -62,19 +62,19 @@ class BinaryLLR:
         # Regularize and return.
         return 0.5 * np.vdot(model,model) + self.C * innersum
 
-    def cost_gradient(self, X, poslatents, model):
+    def cost_gradient(self, negatives, poslatents, model):
         """ Computes the gradient of the cost function at a given
             point.
 
         Arguments:
-            X          samples to compute the cost function on,
-                       ordered with positive samples at the beginning.
+            negatives  negative samples to compute the cost function on.
             poslatents matrix of latent vectors as rows for positive
-                      samples.
-            model     model vector to compute the cost for.
+                       samples.
+            model      model vector to compute the cost for.
         """
-        nb_samples, nb_featuresp1 = X.shape
         nb_pos = poslatents.shape[0]
+        nb_samples = nb_pos + len(negatives)
+        nb_featuresp1 = model.size
         innersum = np.zeros([nb_featuresp1])
 
         # Compute gradient for positive samples.
@@ -86,10 +86,10 @@ class BinaryLLR:
             )
         # Compute latent vector and gradient for negative samples.
         biaslessmodel = model[1:nb_featuresp1]
-        for i in range(nb_pos, nb_samples):
+        for i in range(len(negatives)):
             latvec = self.latent_function(
                 biaslessmodel,
-                X[i,1:nb_featuresp1]
+                negatives[i]
             )
             # Add up the bias to the latent vector.
             biaslatvec = np.empty([nb_featuresp1])
@@ -104,41 +104,24 @@ class BinaryLLR:
         # Add up the gradient of the regularization term.
         return model + self.C + innersum
         
-    def fit(self, X, y, initmodel, nbiter):
-        """ Fits the model against data X with class labels y.
+    def fit(self, positives, negatives, initmodel, nbiter):
+        """ Fits the model against positive and negative samples
+            given an initial model to optimize. It should be noted
+            that positives and negative samples may be any python
+            datatype, as their handling is defined by the latent function.
 
         Arguments:
-            X         nb_samples by nb_features matrix of sample vectors.
-            y         nb_samples vector of class labels in the {0, 1} set.
-            initmodel an initial nb_features dimensional vector to 
+            positives array of positive samples.
+            negatives array of negative samples.
+            initmodel an initial nb_features dimensional model vector to 
                       optimize.
             nbiter    number of iterations of coordinate descent to run.
         """
         # Checks that everything is in order.
-        nb_samples, nb_features = X.shape
-        assert initmodel.size = nb_features + 1
-        assert y.size == nb_samples
-        assert (y == 0 | y == 1).all()
+        nb_samples = len(positives) + len(negatives)
+        nb_features = initmodel.size
         assert self.latent_function != None
-        
-        # sort the data so positive samples are at the beginning.
-        nb_pos = (y == 1).sum()
-        X_ = np.empty_like(X)
-        y_ = np.empty_like(y)
-
-        posidx = 0
-        negidx = nb_pos
-        for i in range(nb_samples):
-            if y[i] == 1:
-                X_[posidx,:] = X[i,:]
-                y_[posidx] = 1
-                posidx += 1
-            else:
-                X_[negidx,:] = X[i,:]
-                y_[negidx] = 0
-                negidx += 1
-        
-        currentmodel = np.array([nb_features + 1])
+        currentmodel = np.empty([nb_features + 1])
         # bias
         currentmodel[0] = 0
         currentmodel[1:nb_features+1] = initmodel
@@ -147,15 +130,15 @@ class BinaryLLR:
         # descent approach.
         for t in range(nbiter):
             if self.verbose:
-                print "Running iteration " + repr(nbiter)
+                print "Running iteration " + repr(t)
                 print "Computing latent vectors for positive samples..."
             # Compute latent vectors for positive samples.
-            poslatents = np.empty([nb_pos, nb_features + 1])
+            poslatents = np.empty([len(positives), nb_features + 1])
             
-            for i in range(nb_pos):
-                latvec = latent_function(
+            for i in range(len(positives)):
+                latvec = self.latent_function(
                     currentmodel[1:nb_features],
-                    X_[i]
+                    positives[i]
                 )
                 poslatents[i,1:nb_features+1] = latvec
                 # bias
@@ -168,13 +151,13 @@ class BinaryLLR:
             currentmodel, fopt, func_calls, grad_calls, warnflag = (
                 scipy.optimize.fmin_cg(
                     lambda m: self.cost_function(
-                        X_,
+                        negatives,
                         poslatents,
                         m
                     ),
                     currentmodel,
                     fprime=lambda m: self.cost_gradient(
-                        X_,
+                        negatives,
                         poslatents,
                         m
                     ),

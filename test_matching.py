@@ -17,7 +17,8 @@ class TestMatching(unittest.TestCase):
                             np.random.randint(1, fcols+1))
             fmap = np.random.rand(frows, fcols, fdim)
             linfilter = np.random.rand(lrows, lcols, fdim)
-            response = match_filter(fmap, linfilter)
+            (response, padded) = match_filter(fmap, linfilter, 
+                                              return_padded=True)
             rrows, rcols = response.shape
             if not (rrows == frows and rcols == fcols):
                 print "fmap shape: " + repr(fmap.shape)
@@ -25,6 +26,20 @@ class TestMatching(unittest.TestCase):
                 print "respshape: " + repr(response.shape)
             self.assertEqual(rrows, frows)
             self.assertEqual(rcols, fcols)
+            maxi, maxj = np.unravel_index(
+                np.argmax(response),
+                response.shape
+            )
+            subwin = padded[maxi:maxi+lrows, maxj:maxj+lcols]
+            # for some reason OpenCV's code is wildly inaccurate - can only get
+            # accuracy up to one decimal place. This might be because OpenCV's
+            # code relies on the fast convolution algorithm, which may be unstable
+            # numerically.
+            self.assertAlmostEqual(
+                np.vdot(linfilter, subwin),
+                response[maxi,maxj],
+                places=1
+            )
 
 if __name__ == "__main__":
     unittest.main()
