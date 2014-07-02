@@ -1,10 +1,10 @@
 """ Generic binary latent logistic regression classifier.
 """
 import numpy as np
-from scipy.optimize import fmin_cg
+from scipy.optimize import fmin_cg, fmin_l_bfgs_b, fmin_bfgs
 
 class BinaryLLR:
-    def __init__(self, latent_function, C, verbose=False):
+    def __init__(self, latent_function, C, verbose=False, algorithm='l-bfgs'):
         """ Initializes the model with a specific function for latent
             computation.
 
@@ -21,10 +21,74 @@ class BinaryLLR:
                                latent vector. Should be convex in beta, otherwise
                                the training procedure may not converge.
             C                  soft margin parameter.
+            verbose            true if you want information messages printed at
+                               regular intervals.
+            algorithm          algorithm to use for optimizing the the cost function.
+                               Must be one of 'cg' for conjugate gradient, 'bfgs' for
+                               BFGS, or 'l-bfgs' for L-BFGS. Note that L-BFGS is
+                               significantly more efficient in our implementation.
         """
+        assert algorithm in ['cg', 'bfgs', 'l-bfgs']
         self.latent_function = latent_function
         self.C = C
         self.verbose = verbose
+        self.algorithm = algorithm
+
+    def cost_function_and_grad(self, negatives, poslatents, model):
+        """ Compute function value and gradient in one go. About twice
+            more efficient thant calling cost_function and cost_gradient
+            separately.
+        """
+        nb_pos = poslatents.shape[0]
+        nb_samples = nb_pos + len(negatives)
+        nb_featuresp1 = model.size
+        costinnersum = 0
+        gradinnersum = np.zeros([nb_featuresp1])
+
+        # Add up logistic loss for positive samples.
+        for i in range(nb_pos):
+            # Cost function.
+            latvec = poslatents[i,:]
+            modellatdot = np.vdot(model, latvec)
+            costinnersum += np.log(1 + np.exp(-modellatdot))
+            # Gradient.
+            gradinnersum += (
+                (1.0 / (1 + np.exp(modellatdot)))
+                * latvec
+            )
+        # Compute latent value and add up logistic loss for negative
+        # samples.
+        biaslessmodel = model[1:nb_featuresp1]
+        for i in range(len(negatives)):
+            # Cost function.
+            latvec = self.latent_function(
+                biaslessmodel,
+                negatives[i]
+            )
+            biaslatvec = np.empty([nb_featuresp1])
+            biaslatvec[0] = 1
+            biaslatvec[1:nb_featuresp1] = latvec
+            modellatdot = np.vdot(model, biaslatvec)
+            costinnersum += np.log(1 + np.exp(modellatdot))
+            # Gradient.
+            gradinnersum += (
+                (1.0 / (1 + np.exp(-modellatdot)))
+                * biaslatvec
+            )
+        # Regularize and return. Ignore the bias for regularization.
+        cost = 0.5 * np.vdot(model, model) + self.C * costinnersum
+        gradient = model + self.C * gradinnersum
+
+        if self.verbose:
+            print "cost: " + repr(cost)
+            print "model norm: " + repr(np.linalg.norm(model))
+            print "gradient size: " + repr(gradient.size)
+            print "gradient norm: " + repr(np.linalg.norm(gradient))
+            print "gradient max: " + repr(gradient.max()) + " at " + repr(gradient.argmax())
+            print "gradient min: " + repr(gradient.min())
+            print "gradient avg: " + repr(gradient.mean())
+
+        return (cost, gradient)
 
     def cost_function(self, negatives, poslatents, model):
         """ Computes the logistic cost function. Runs in
@@ -56,12 +120,13 @@ class BinaryLLR:
             )
             modellatdot = (
                 np.vdot(latvec, biaslessmodel) 
-                + model[nb_featuresp1 - 1] # add up the bias
+                + model[0] # add up the bias
             )
             innersum += np.log(1 + np.exp(modellatdot))
         
         # Regularize and return. Ignore the bias for regularization.
-        cost = 0.5 * np.vdot(biaslessmodel,biaslessmodel) + self.C * innersum
+        cost = 0.5 * np.vdot(model,model) + self.C * innersum
+
         if self.verbose:
             print "cost: " + repr(cost)
         return cost
@@ -107,6 +172,7 @@ class BinaryLLR:
         
         # Add up the gradient of the regularization term.
         gradient = model + self.C * innersum
+
         if self.verbose:
             print "model norm: " + repr(np.linalg.norm(model))
             print "gradient size: " + repr(gradient.size)
@@ -116,7 +182,7 @@ class BinaryLLR:
             print "gradient avg: " + repr(gradient.mean())
         return gradient
         
-    def fit(self, positives, negatives, initmodel, nbiter):
+    def fit(self, positives, negatives, initmodel, nbiter=1):
         """ Fits the model against positive and negative samples
             given an initial model to optimize. It should be noted
             that positives and negative samples may be any python
@@ -159,27 +225,60 @@ class BinaryLLR:
                 print "Optimizing the cost function for fixed positive latents..."
             # Optimizes the cost function for the fixed positive
             # latent vectors.
-            currentmodel, fopt, func_calls, grad_calls, warnflag = (
-                fmin_cg(
-                    lambda m: self.cost_function(
-                        negatives,
-                        poslatents,
-                        m
-                    ),
-                    currentmodel,
-                    fprime=lambda m: self.cost_gradient(
-                        negatives,
-                        poslatents,
-                        m
-                    ),
-                    full_output=True
+            warnflag = None
+            if self.algorithm=='l-bfgs':
+                currentmodel, fopt, d = (
+                    fmin_l_bfgs_b(
+                        lambda m: self.cost_function(
+                            negatives,
+                            poslatents,
+                            m
+                        ),
+                        currentmodel,
+                        lambda m: self.cost_gradient(
+                            negatives,
+                            poslatents,
+                            m
+                        )
+                    )
                 )
-            )
+                warnflag = d['warnflag']
+            elif self.algorithm=='cg':
+                currentmodel, fopt, fcalls, gcalls, warnflag = (
+                    fmin_cg(
+                        lambda m: self.cost_function(
+                            negatives,
+                            poslatents,
+                            m
+                        ),
+                        currentmodel,
+                        lambda m: self.cost_gradient(
+                            negatives,
+                            poslatents,
+                            m
+                        ),
+                        full_output=True
+                    )
+                )
+            elif self.algorithm=='bfgs':
+                currentmodel, fopt, gopt, Bopt, fcalls, gcalls, warnflag = (
+                    fmin_bfgs(
+                        lambda m: self.cost_function(
+                            negatives,
+                            poslatents,
+                            m
+                        ),
+                        currentmodel,
+                        lambda m: self.cost_gradient(
+                            negatives,
+                            poslatents,
+                            m
+                        ),
+                        full_output=True
+                    )
+                )
+            
             if self.verbose:
-                print "Optimization resulte:"
-                print "min value: " + repr(fopt)
-                print "cost calls: " + repr(func_calls)
-                print "gradient calls: " + repr(grad_calls)
                 if warnflag == 0:
                     print "Successfully converged."
                 elif warnflag == 1:

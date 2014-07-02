@@ -38,11 +38,12 @@ class TestPartClassifier(unittest.TestCase):
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
         classifier = SinglePartClassifier(
-            0.01,
+            0.1,
             feature,
             mindimdiv,
             verbose=True,
-            debug=True
+            debug=True,
+            algorithm='bfgs'
         )
         label = 'asuka_langley'
         positives = self.traindata[label]

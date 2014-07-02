@@ -11,12 +11,14 @@ from features import compute_regular_featmap
 from warpclassifier import WarpClassifier
 
 class SinglePartClassifier:
-    def __init__(self, C, feature, mindimdiv, verbose=False, debug=False):
+    def __init__(self, C, feature, mindimdiv, verbose=False, debug=False,
+                 algorithm=None):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.verbose = verbose
         self.debug = debug
+        self.algorithm = algorithm
 
     def best_match(self, partmodel, featmap):
         """ Returns the flattened subwindow of the feature map which maps the part 
@@ -77,7 +79,7 @@ class SinglePartClassifier:
         
         # Train a latent logistic regression on the feature maps with the
         # best match latent function.
-        self.llr = BinaryLLR(self.best_match, self.C, self.verbose)
+        self.llr = BinaryLLR(self.best_match, self.C, self.verbose, self.algorithm)
         self.llr.fit(posmaps, negmaps, initpart, 4)
         # For vizualisation, set the featmap to the resahped model vector.
         self.model_featmap = self.llr.model[1:].reshape(
