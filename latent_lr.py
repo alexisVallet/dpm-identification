@@ -18,7 +18,8 @@ class BinaryLLR:
                                Where beta is an arbitrary dimensional 
                                model vector, and x is a nb_features dimensional
                                vector. Should return an nb_feature dimensional 
-                    latent vector.
+                               latent vector. Should be convex in beta, otherwise
+                               the training procedure may not converge.
             C                  soft margin parameter.
         """
         self.latent_function = latent_function
@@ -59,8 +60,11 @@ class BinaryLLR:
             )
             innersum += np.log(1 + np.exp(modellatdot))
         
-        # Regularize and return.
-        return 0.5 * np.vdot(model,model) + self.C * innersum
+        # Regularize and return. Ignore the bias for regularization.
+        cost = 0.5 * np.vdot(biaslessmodel,biaslessmodel) + self.C * innersum
+        if self.verbose:
+            print "cost: " + repr(cost)
+        return cost
 
     def cost_gradient(self, negatives, poslatents, model):
         """ Computes the gradient of the cost function at a given
@@ -102,7 +106,15 @@ class BinaryLLR:
             )
         
         # Add up the gradient of the regularization term.
-        return model + self.C + innersum
+        gradient = model + self.C * innersum
+        if self.verbose:
+            print "model norm: " + repr(np.linalg.norm(model))
+            print "gradient size: " + repr(gradient.size)
+            print "gradient norm: " + repr(np.linalg.norm(gradient))
+            print "gradient max: " + repr(gradient.max()) + " at " + repr(gradient.argmax())
+            print "gradient min: " + repr(gradient.min())
+            print "gradient avg: " + repr(gradient.mean())
+        return gradient
         
     def fit(self, positives, negatives, initmodel, nbiter):
         """ Fits the model against positive and negative samples
@@ -137,19 +149,18 @@ class BinaryLLR:
             
             for i in range(len(positives)):
                 latvec = self.latent_function(
-                    currentmodel[1:nb_features],
+                    currentmodel[1:nb_features+1],
                     positives[i]
                 )
                 poslatents[i,1:nb_features+1] = latvec
                 # bias
-                poslatents[0] = 1
-
+                poslatents[i,0] = 1
             if self.verbose:
                 print "Optimizing the cost function for fixed positive latents..."
             # Optimizes the cost function for the fixed positive
             # latent vectors.
             currentmodel, fopt, func_calls, grad_calls, warnflag = (
-                scipy.optimize.fmin_cg(
+                fmin_cg(
                     lambda m: self.cost_function(
                         negatives,
                         poslatents,
@@ -178,3 +189,26 @@ class BinaryLLR:
 
         # Saves the results.
         self.model = currentmodel
+
+    def predict_proba(self, samples):
+        """ Returns probabilities of each sample being a positive sample.
+        
+        Arguments:
+            samples    array of samples to predict probabilities for. Each
+                       sample should be of the datatype accepted by 
+                       self.latent_function .
+        Returns:
+           nb_sample numpy vector of probabilities.
+        """
+        nb_sample = len(samples)
+        probas = np.empty([nb_sample])
+
+        biaslessmodel = self.model[1:]
+        for i in range(nb_sample):
+            latvec = self.latent_function(biaslessmodel, samples[i])
+            probas[i] = 1.0 / (1 + np.exp(
+                -np.vdot(biaslessmodel, latvec)
+                -self.model[0] # bias
+            ))
+        
+        return probas

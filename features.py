@@ -31,6 +31,13 @@ class Feature:
         }
         return _visfuncs[self.featname](self.params)(featvector)
 
+    def vis_featmap(self, featmap):
+        return visualize_featmap(
+            featmap,
+            self.visualize,
+            blocksize=(1,1)
+        )
+
     def __repr__(self):
         return "%s(%r)" % (self.__class__, self.__dict__)
 
