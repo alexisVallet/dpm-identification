@@ -43,7 +43,7 @@ class TestPartClassifier(unittest.TestCase):
             mindimdiv,
             verbose=True,
             debug=True,
-            algorithm='bfgs'
+            algorithm='l-bfgs'
         )
         label = 'asuka_langley'
         positives = self.traindata[label]

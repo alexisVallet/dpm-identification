@@ -1,7 +1,7 @@
 """ Generic binary latent logistic regression classifier.
 """
 import numpy as np
-from scipy.optimize import fmin_cg, fmin_l_bfgs_b, fmin_bfgs
+from scipy.optimize import fmin_cg, fmin_l_bfgs_b, fmin_bfgs, fmin_ncg
 
 class BinaryLLR:
     def __init__(self, latent_function, C, verbose=False, algorithm='l-bfgs'):
@@ -25,10 +25,11 @@ class BinaryLLR:
                                regular intervals.
             algorithm          algorithm to use for optimizing the the cost function.
                                Must be one of 'cg' for conjugate gradient, 'bfgs' for
-                               BFGS, or 'l-bfgs' for L-BFGS. Note that L-BFGS is
-                               significantly more efficient in our implementation.
+                               BFGS, 'l-bfgs' for L-BFGS or 'ncg' for the Newton-CG 
+                               method. Note that L-BFGS is significantly more efficient 
+                               in our implementation.
         """
-        assert algorithm in ['cg', 'bfgs', 'l-bfgs']
+        assert algorithm in ['cg', 'bfgs', 'l-bfgs', 'ncg']
         self.latent_function = latent_function
         self.C = C
         self.verbose = verbose
@@ -76,8 +77,12 @@ class BinaryLLR:
                 * biaslatvec
             )
         # Regularize and return. Ignore the bias for regularization.
-        cost = 0.5 * np.vdot(model, model) + self.C * costinnersum
-        gradient = model + self.C * gradinnersum
+        # Exclude bias from regularization.
+        zerobiasmodel = np.empty([nb_featuresp1])
+        zerobiasmodel[0] = 0
+        zerobiasmodel[1:nb_featuresp1] = biaslessmodel
+        cost = 0.5 * np.vdot(biaslessmodel, biaslessmodel) + self.C * costinnersum
+        gradient = zerobiasmodel + self.C * gradinnersum
 
         if self.verbose:
             print "cost: " + repr(cost)
@@ -124,8 +129,9 @@ class BinaryLLR:
             )
             innersum += np.log(1 + np.exp(modellatdot))
         
-        # Regularize and return. Ignore the bias for regularization.
-        cost = 0.5 * np.vdot(model,model) + self.C * innersum
+        # Regularize and return.
+        # Exclude bias from regularization.
+        cost = 0.5 * np.vdot(biaslessmodel,biaslessmodel) + self.C * innersum
 
         if self.verbose:
             print "cost: " + repr(cost)
@@ -171,7 +177,11 @@ class BinaryLLR:
             )
         
         # Add up the gradient of the regularization term.
-        gradient = model + self.C * innersum
+        # Exclude bias from regularization.
+        zerobiasmodel = np.empty([nb_featuresp1])
+        zerobiasmodel[0] = 0
+        zerobiasmodel[1:nb_featuresp1] = biaslessmodel
+        gradient = zerobiasmodel + self.C * innersum
 
         if self.verbose:
             print "model norm: " + repr(np.linalg.norm(model))
@@ -229,17 +239,12 @@ class BinaryLLR:
             if self.algorithm=='l-bfgs':
                 currentmodel, fopt, d = (
                     fmin_l_bfgs_b(
-                        lambda m: self.cost_function(
+                        lambda m: self.cost_function_and_grad(
                             negatives,
                             poslatents,
                             m
                         ),
-                        currentmodel,
-                        lambda m: self.cost_gradient(
-                            negatives,
-                            poslatents,
-                            m
-                        )
+                        currentmodel
                     )
                 )
                 warnflag = d['warnflag']
@@ -275,6 +280,23 @@ class BinaryLLR:
                             m
                         ),
                         full_output=True
+                    )
+                )
+            elif self.algorithm=='ncg':
+                currentmodel, fopt, fcalls, gcalls, hcalls, warnflag = (
+                    fmin_ncg(
+                        lambda m: self.cost_function(
+                            negatives,
+                            poslatents,
+                            m
+                        ),
+                        currentmodel,
+                        lambda m: self.cost_gradient(
+                            negatives,
+                            poslatents,
+                            m
+                        ),
+                        full_output = True
                     )
                 )
             
