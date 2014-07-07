@@ -27,10 +27,10 @@ def max_energy_subwindow(featmap, winsize):
     
     return (maxsubwin, maxanchor)
 
-class SinglePartClassifier:
-    """ Classifier with a single, free-floating part over the images - meaning
-        there are no deformation costs. Mostly intended as a test case for the
-        LLR implementation.
+class BinaryPartClassifier:
+    """ Classifier with a single, free-floating part over the images 
+        - meaning there are no deformation costs. Mostly intended as a 
+        test case for the LLR implementation.
     """
     def __init__(self, C, feature, mindimdiv, verbose=False, debug=False,
                  algorithm=None):
@@ -42,10 +42,11 @@ class SinglePartClassifier:
         self.algorithm = algorithm
 
     def best_match(self, partmodel, featmap, return_pos=False):
-        """ Returns the flattened subwindow of the feature map which maps the part 
-            filter best.
+        """ Returns the flattened subwindow of the feature map which maps 
+            the part filter best.
         """
-        part = partmodel.reshape(self.partsize, self.partsize, self.feature.dimension)
+        part = partmodel.reshape(self.partsize, self.partsize, 
+                                 self.feature.dimension)
         (response, padded) = match_filter(featmap, part, return_padded=True)
         maxi, maxj = np.unravel_index(
             np.argmax(response),
@@ -63,8 +64,8 @@ class SinglePartClassifier:
         return compute_regular_featmap(image, self.feature, self.mindimdiv)
 
     def matching_box(self, image):
-        """ Applies prediction on the image, and return the matching subwindow
-            coordinates for the part.
+        """ Applies prediction on the image, and return the matching 
+            subwindow coordinates for the part.
         """
         assert self.llr != None
         fmap = self.tofeatmap(image)
@@ -73,18 +74,19 @@ class SinglePartClassifier:
         return (i1, j1, i1 + self.partsize-1, j1 + self.partsize-1)
 
     def train(self, positives, negatives):
-        """ Fits the classifier a set of positive images and a set of negative
-            images.
+        """ Fits the classifier a set of positive images and a set of 
+            negative images.
         
         Arguments:
-            positives    array of positive images, i.e. the classifier should return
-                         a probability close to 1 for.
-            negatives    array of negative images, i.e. the classifier should return
-                         a probability close to 0 for.
+            positives    array of positive images, i.e. the classifier 
+                         should return a probability close to 1 for them.
+            negatives    array of negative images, i.e. the classifier 
+                         should return a probability close to 0 for them.
         """
-        # Initialize the model by training a warping classifier on all images,
-        # and taking the highest energy subwindow of the corresponding model with
-        # a small square patch size (half mindimdiv).
+        # Initialize the model by training a warping classifier on all 
+        # images, and taking the highest energy subwindow of the 
+        # corresponding model with a small square patch size (half 
+        # mindimdiv).
         warp = WarpClassifier(self.feature, self.mindimdiv, self.C)
         warp.train(positives, negatives)
         warpmap = warp.model_featmap
@@ -107,7 +109,8 @@ class SinglePartClassifier:
         
         # Train a latent logistic regression on the feature maps with the
         # best match latent function.
-        self.llr = BinaryLLR(self.best_match, self.C, self.verbose, self.algorithm)
+        self.llr = BinaryLLR(self.best_match, self.C, self.verbose, 
+                             self.algorithm)
         self.llr.fit(posmaps, negmaps, initpart, 4)
         # For vizualisation, set the featmap to the resahped model vector.
         self.model_featmap = self.llr.model[1:].reshape(
@@ -126,5 +129,6 @@ class SinglePartClassifier:
         # Compute feature maps
         fmaps = map(self.tofeatmap, images)
         
-        # Use the internal latent logistic regression to predict probabilities.
+        # Use the internal latent logistic regression to predict 
+        # probabilities.
         return self.llr.predict_proba(fmaps)

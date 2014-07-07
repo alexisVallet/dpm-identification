@@ -8,7 +8,7 @@ from sklearn.metrics import roc_curve, roc_auc_score
 import matplotlib.pyplot as plt
 
 from ioutils import load_data
-from partclassifier import SinglePartClassifier
+from partclassifier import BinaryPartClassifier
 from features import Feature
 
 class TestPartClassifier(unittest.TestCase):
@@ -33,12 +33,12 @@ class TestPartClassifier(unittest.TestCase):
                 else:
                     cls.traindata[label] += folddata[label]
 
-    def test_classifier(self):
+    def test_binary_classifier(self):
         nbbins = (4,4,4)
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
-        classifier = SinglePartClassifier(
-            0.1,
+        classifier = BinaryPartClassifier(
+            0.01,
             feature,
             mindimdiv,
             verbose=True,
