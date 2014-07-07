@@ -41,7 +41,7 @@ class SinglePartClassifier:
         self.debug = debug
         self.algorithm = algorithm
 
-    def best_match(self, partmodel, featmap):
+    def best_match(self, partmodel, featmap, return_pos=False):
         """ Returns the flattened subwindow of the feature map which maps the part 
             filter best.
         """
@@ -52,11 +52,25 @@ class SinglePartClassifier:
             response.shape
         )
         
-        return padded[maxi:maxi+self.partsize,
-                      maxj:maxj+self.partsize].flatten('C')
+        subwin = padded[maxi:maxi+self.partsize,
+                        maxj:maxj+self.partsize].flatten('C')
+        if return_pos:
+            return (subwin, (maxi, maxj))
+        else:
+            return subwin
 
     def tofeatmap(self, image):
         return compute_regular_featmap(image, self.feature, self.mindimdiv)
+
+    def matching_box(self, image):
+        """ Applies prediction on the image, and return the matching subwindow
+            coordinates for the part.
+        """
+        assert self.llr != None
+        fmap = self.tofeatmap(image)
+        (subwin, (i1, j1)) = self.best_match(self.llr.model[1:], fmap, 
+                                             return_pos=True)
+        return (i1, j1, i1 + self.partsize-1, j1 + self.partsize-1)
 
     def train(self, positives, negatives):
         """ Fits the classifier a set of positive images and a set of negative
@@ -114,60 +128,3 @@ class SinglePartClassifier:
         
         # Use the internal latent logistic regression to predict probabilities.
         return self.llr.predict_proba(fmaps)
-
-class DeformPartClassifier(SinglePartClassifier):
-    """ Same as SinglePartClassifier, except the part now has an anchor and
-        deformation costs with fixed deformation coefficients.
-    """
-    def __init__(self, C, feature, mindimdiv, deformation, verbose=False,
-                 debug=False, algorithm=None):
-        super(SinglePartClassifier, self).__init__(C, feature, mindimdiv,
-                                                   verbose=verbose,
-                                                   debug=debug,algorithm=algorithm)
-        self.deformation = deformation
-
-    def best_match(self, partmodel, featmap):
-        
-
-    def train(self, positives, negatives):
-        """ Fits the classifier a set of positive images and a set of negative
-            images.
-        
-        Arguments:
-            positives    array of positive images, i.e. the classifier should return
-                         a probability close to 1 for.
-            negatives    array of negative images, i.e. the classifier should return
-                         a probability close to 0 for.
-        """
-        # Initialize the model by training a warping classifier on all images,
-        # and taking the highest energy subwindow of the corresponding model with
-        # a small square patch size (half mindimdiv).
-        warp = WarpClassifier(self.feature, self.mindimdiv, self.C)
-        warp.train(positives, negatives)
-        warpmap = warp.model_featmap
-        if self.debug:
-            # Displays the learned warped feature map
-            image = self.feature.vis_featmap(warpmap)
-            cv2.namedWindow("Initial warped map", cv2.WINDOW_NORMAL)
-            cv2.imshow("Initial warped map", image)
-            cv2.waitKey(0)
-        self.partsize = self.mindimdiv // 2
-
-        (maxsubwin, maxanchor) = max_energy_subwindow(warpmap, self.partsize)
-        self.anchor = maxanchor
-        initpart = maxsubwin.flatten('C')
-
-        # Compute feature maps for all samples
-        posmaps = map(self.tofeatmap, positives)
-        negmaps = map(self.tofeatmap, negatives)
-        
-        # Train a latent logistic regression on the feature maps with the
-        # best match latent function.
-        self.llr = BinaryLLR(self.best_match, self.C, self.verbose, self.algorithm)
-        self.llr.fit(posmaps, negmaps, initpart, 4)
-        # For vizualisation, set the featmap to the resahped model vector.
-        self.model_featmap = self.llr.model[1:].reshape(
-            self.partsize,
-            self.partsize,
-            self.feature.dimension
-        )

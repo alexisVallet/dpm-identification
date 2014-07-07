@@ -1,7 +1,10 @@
 """ Generic binary latent logistic regression classifier.
 """
 import numpy as np
+import multiprocessing as mp
 from scipy.optimize import fmin_cg, fmin_l_bfgs_b, fmin_bfgs, fmin_ncg
+import cPickle as pickle
+import os
 
 class BinaryLLR:
     def __init__(self, latent_function, C, verbose=False, algorithm='l-bfgs'):
@@ -53,7 +56,7 @@ class BinaryLLR:
             modellatdot = np.vdot(model, latvec)
             costinnersum += np.log(1 + np.exp(-modellatdot))
             # Gradient.
-            gradinnersum += (
+            gradinnersum -= (
                 (1.0 / (1 + np.exp(modellatdot)))
                 * latvec
             )
@@ -171,7 +174,7 @@ class BinaryLLR:
             biaslatvec[0] = 1
             biaslatvec[1:nb_featuresp1] = latvec
             modellatdot = np.vdot(model, biaslatvec)
-            innersum += (
+            innersum -= (
                 (1.0 / (1 + np.exp(-modellatdot)))
                 * biaslatvec
             )
@@ -192,7 +195,7 @@ class BinaryLLR:
             print "gradient avg: " + repr(gradient.mean())
         return gradient
         
-    def fit(self, positives, negatives, initmodel, nbiter=1):
+    def fit(self, positives, negatives, initmodel, nbiter=4):
         """ Fits the model against positive and negative samples
             given an initial model to optimize. It should be noted
             that positives and negative samples may be any python
@@ -333,3 +336,114 @@ class BinaryLLR:
             ))
         
         return probas
+
+# Global variable to store training data for multi class LLR parallel training.
+# Using a global variable, the data is copied across processes using the OS's
+# forking semantics - in Linux, this means copy on write. Although the data is
+# read only in the python world, it will still be written to by the python
+# interpreter (for garbage collection for instance) so it will be copied anyway,
+# but that's still waaay more efficient than multiprocessing's pickling of
+# everything.
+_mllr_traindata = None
+
+def binary_fit(label):
+    """ Trains and return a binary classifier in a one vs all fashion, with
+        the rest of the parameters by the _mllr_traindata global variable.
+    """
+    cachedir = _mllr_traindata['cachedir']
+    # Check the cache
+    cachefilename = None
+    if cachedir != None:
+        cachefilename = os.path.join(cachedir, repr(label))
+    if os.path.isfile(cachefilename):
+        return pickle.load(open(cachefilename))
+
+    verbose = _mllr_traindata['verbose']
+    if verbose:
+        print "Running training for " + repr(label)
+    llr = BinaryLLR(_mllr_traindata['latfunc'], _mllr_traindata['C'],
+                    verbose=False, algorithm=_mllr_traindata['algorithm'])
+    samples = _mllr_traindata['samples']
+    labels = _mllr_traindata['labels']
+    positives = [samples[i] for i in range(len(samples)) if labels[i] == label]
+    negatives = [samples[i] for i in range(len(samples)) if labels[i] != label]
+    initmodel = _mllr_traindata['initmodels'][label]
+    llr.fit(positives, negatives, initmodel, _mllr_traindata['nbiter'])
+
+    # cache results
+    if cachedir != None:
+        cachefile = open(cachefilename, 'w')
+        pickle.dump(llr, cachefile)
+        cachefile.close()
+
+    if verbose:
+        print "Finished training for " + repr(label)
+
+    return llr
+
+class LLR:
+    """ Multi class classification with one-vs-all latent logistic regression.
+    """
+    def __init__(self, latent_function, C, verbose=False, algorithm='l-bfgs',
+                 cachedir=None):
+        """ Initializes the model with a specific function for latent
+            computation.
+
+        Arguments:
+            latent_function    function returning taking as argument
+                               a model vector beta and a sample x, 
+                               returning the best possible latent vector
+                               phi(x, z) for all possible latent values
+                               z. Formally:
+                  latent_function(beta, x) = argmax_z (beta . phi(x, z))
+                               Where beta is an arbitrary dimensional 
+                               model vector, and x is a nb_features dimensional
+                               vector. Should return an nb_feature dimensional 
+                               latent vector. Should be convex in beta, otherwise
+                               the training procedure may not converge.
+            C                  soft margin parameter.
+            verbose            true if you want information messages printed at
+                               regular intervals.
+            algorithm          algorithm to use for optimizing the the cost function.
+                               Must be one of 'cg' for conjugate gradient, 'bfgs' for
+                               BFGS, 'l-bfgs' for L-BFGS or 'ncg' for the Newton-CG 
+                               method. Note that L-BFGS is significantly more efficient 
+                               in our implementation.
+            cachedir           Directory to cache intermediate results to, no caching
+                               if omitted.
+        """
+        assert algorithm in ['cg', 'bfgs', 'l-bfgs', 'ncg']
+        self.latent_function = latent_function
+        self.C = C
+        self.verbose = verbose
+        self.algorithm = algorithm
+        self.cachedir = cachedir
+
+    def fit(self, samples, labels, initmodels, nbiter=4):
+        """ Fits the model against a set of training samples with corresponding
+            class labels in a one-vs-all fashion, training binary classifiers in
+            parallel on as many CPU cores as available.
+        
+        Arguments:
+            samples     list nb_sample of training samples.
+            labels      list of nb_sample labels corresponding to each sample.
+            initmodels  dictionary associating an initial model to each class label.
+            nbiter      number of iterations of coordinate descent to run.
+        """
+        # Put the training data in a global variable to avoid pickling.
+        global _mllr_traindata
+        _mllr_traindata = {
+            'samples': samples,
+            'labels': labels,
+            'initmodels': initmodels,
+            'nbiter': nbiter,
+            'latfunc': self.latent_function,
+            'C': self.C,
+            'algorithm': self.algorithm,
+            'verbose': self.verbose,
+            'cachedir': self.cachedir
+        }
+        # Run binary classification training in parallel in a process pool for each
+        # class label.
+        pool = mp.Pool()
+        self.bin_llrs = pool.map(binary_fit, set(labels))

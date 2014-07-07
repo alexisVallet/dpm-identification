@@ -78,7 +78,7 @@ def regular_grid(image, mindimdiv):
     n = mindimdiv
     m = int(round(height * n / width))
 
-    return [m,n] if rotated else [n,m]
+    return [n,m] if rotated else [m,n]
 
 def compute_regular_featmap(image, feature, mindimdiv):
     # Compute the features for each layer. A feature is represented as a 3d

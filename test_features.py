@@ -1,4 +1,4 @@
-"" Unit tests for features.py
+""" Unit tests for features.py
 """
 import unittest
 import cv2
@@ -21,14 +21,19 @@ class TestFeatures(unittest.TestCase):
         
 
     def test_visualize_featmap(self):
-        bgrimg = cv2.imread('data/images/source/asahina_mikuru_0.jpg')
-        nbbins = (6,6,6)
-        featmap = feat.compute_regular_featmap(bgrimg, 10, 
-                                               feat.bgrhistogram(nbbins),
-                                               np.prod(nbbins))
-        featimage = feat.visualize_featmap(featmap, feat.bgrhistvis(nbbins))
+        nbbins = (4,4,4)
+        featdim = np.prod(nbbins)
+        mindimdiv = 10
+        bgrimg = cv2.imread('35562572_m.png')
+        feature = feat.Feature('bgrhist', featdim, nbbins)
+        featmap = feat.compute_regular_featmap(bgrimg, feature, mindimdiv)
+        rows, cols = featmap.shape[0:2]
+        featimage = feature.vis_featmap(featmap)
+        flatfeatimage = feature.vis_featmap(featmap.reshape([1, rows*cols, featdim]))
         cv2.namedWindow("feature map", cv2.WINDOW_NORMAL)
+        cv2.namedWindow("flat map", cv2.WINDOW_NORMAL)
         cv2.imshow("feature map", featimage)
+        cv2.imshow("flat map", flatfeatimage)
         cv2.waitKey(0)
 
 if __name__ == "__main__":

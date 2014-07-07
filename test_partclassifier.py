@@ -4,7 +4,7 @@ import unittest
 import cv2
 import numpy as np
 import os
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_curve, roc_auc_score
 import matplotlib.pyplot as plt
 
 from ioutils import load_data
@@ -73,9 +73,23 @@ class TestPartClassifier(unittest.TestCase):
         print "computing ROC curve"
         binlabels = np.array([1 if l == label else 0 for l in testlabels])
         fpr, tpr, threshs = roc_curve(binlabels, probas)
-        plt.plot(fpr, tpr)
+        print "auc: " + repr(roc_auc_score(binlabels, probas))
+        print "thresholds:"
         print repr(threshs)
+        plt.plot(fpr, tpr)
         plt.show()
+
+        # show which parts are picked up in each test image, from highest
+        # to lowest probability
+        idxs = np.argsort(probas)[::-1]
+        
+        for i in idxs:
+            print "probability: " + repr(probas[i])
+            image = np.array(testsamples[i])
+            (i1,j1,i2,j2) = classifier.matching_box(image)
+            cv2.rectangle(image, (j1,i1), (j2,i2), (0,0,255), 4)
+            cv2.imshow("image", image)
+            cv2.waitKey(0)
 
 if __name__ == "__main__":
     unittest.main()
