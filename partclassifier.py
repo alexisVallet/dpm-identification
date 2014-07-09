@@ -9,25 +9,9 @@ from matching import match_filter
 from latent_lr import BinaryLLR
 from features import compute_regular_featmap
 from warpclassifier import WarpClassifier
+from features import max_energy_subwindow
 
-def max_energy_subwindow(featmap, winsize):
-    wrows, wcols, featdim = featmap.shape
-    maxanchor = None
-    maxsubwin = None
-    maxenergy = 0
-    
-    for i in range(wrows - winsize):
-        for j in range(wcols - winsize):
-            subwin = featmap[i:i+winsize,j:j+winsize]
-            energy = np.vdot(subwin, subwin)
-            if maxsubwin == None or maxenergy < energy:
-                maxanchor = (i,j)
-                maxenergy = energy
-                maxsubwin = subwin
-    
-    return (maxsubwin, maxanchor)
-
-def best_match(partmodel, featmap, args):
+def _best_match(partmodel, featmap, args):
     """ Returns the flattened subwindow of the feature map which maps 
     the part filter best.
     """
@@ -62,16 +46,6 @@ class BinaryPartClassifier:
 
     def tofeatmap(self, image):
         return compute_regular_featmap(image, self.feature, self.mindimdiv)
-
-    def matching_box(self, image):
-        """ Applies prediction on the image, and return the matching 
-            subwindow coordinates for the part.
-        """
-        assert self.llr != None
-        fmap = self.tofeatmap(image)
-        (subwin, (i1, j1)) = self.best_match(self.llr.model[1:], fmap, 
-                                             return_pos=True)
-        return (i1, j1, i1 + self.partsize-1, j1 + self.partsize-1)
 
     def train(self, positives, negatives):
         """ Fits the classifier a set of positive images and a set of 
@@ -109,7 +83,7 @@ class BinaryPartClassifier:
         
         # Train a latent logistic regression on the feature maps with the
         # best match latent function.
-        self.llr = BinaryLLR(best_match, self.C, verbose=self.verbose, 
+        self.llr = BinaryLLR(_best_match, self.C, verbose=self.verbose, 
                              algorithm=self.algorithm, 
                              latent_args=(self.partsize, self.feature.dimension, 
                                           False))

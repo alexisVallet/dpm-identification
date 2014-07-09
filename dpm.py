@@ -4,30 +4,25 @@ import numpy as np
 import cv2
 
 class DPM:
-    def __init__(self, root, parts, anchors, deforms, bias):
-        """ Initializes a deformable parts model with a root filter and a 
+    def __init__(self, parts, anchors, deforms):
+        """ Initializes a deformable parts model with no root and a
             set of part filters with relative anchor positions.
         
         Argument:
-            root    n by m by featdim numpy array for the root filter, n 
-                    and m any naturals.
             parts   list of k n_i by m_i by featdim numpy arrays for the 
                     parts filters, n_i and m_i possibly varying for each.
-            anchors list of k anchor positions for each part, as 2d (x,y) 
-                    numpy arrays corresponding to placement relative to 
+            anchors list of k anchor positions for each part, as 2d (i,j) 
+                    numpy arrays corresponding to placement relative to
                     the root filter in the lower layer of the pyramid.
-            deforms list of k 4d vectors containing deformation 
+            deforms list of k 4d vectors containing deformation
                     coefficients.
-            bias    bias of the dpm in a mixture model.
         """
         assert len(parts) == len(anchors)
         assert len(parts) == len(deforms)
 
-        self.root = root
         self.parts = parts
         self.anchors = anchors
         self.deforms = deforms
-        self.bias = bias
 
     def tovector(self):
         """ Computes a vector representation for the DPM suitable for LSVM
@@ -40,9 +35,8 @@ class DPM:
             positions are not included, and implicitely used in the latent
             vectors.
         """
-        flattenedfilters = map(lambda f: f.flatten('C'), 
-                               [self.root] + self.parts)
-        toconcat = flattenedfilters + self.deforms + [np.array([self.bias])]
+        flattenedfilters = map(lambda f: f.flatten('C'), self.parts)
+        toconcat = flattenedfilters + self.deforms
 
         return np.concatenate(toconcat)
 
@@ -51,7 +45,7 @@ class DPM:
             i.e. the information which should be unchanged by training the
             model.
         """
-        return DPMSize(self.root.shape, map(lambda part: part.shape, self.parts),
+        return DPMSize(map(lambda part: part.shape, self.parts),
                        self.anchors)
 
     def __eq__(self, other):
@@ -62,8 +56,7 @@ class DPM:
         return (np.allclose(self.root, other.root) 
                 and allpairsclose(self.parts, other.parts)
                 and allpairsclose(self.anchors, other.anchors)
-                and allpairsclose(self.deforms, other.deforms)
-                and self.bias == other.bias)
+                and allpairsclose(self.deforms, other.deforms))
 
     def toimages(self, featvis):
         """ Returns images for the root and for each part.
@@ -78,15 +71,13 @@ class DPMSize:
     """ Class describing the information of a DPM which are unchanged by
         training: number of parts, filter sizes and anchor positions.
     """
-    def __init__(self, rootshape, partshapes, anchors):
-        self.rootshape = rootshape
+    def __init__(self, partshapes, anchors):
         self.partshapes = partshapes
         self.anchors = anchors
 
     def vectorsize(self):
-        return int(np.prod(self.rootshape) + 
-                   np.sum(map(lambda ps: np.prod(ps),self.partshapes)) +
-                   len(self.partshapes) * 4 + 1)
+        return int(np.sum(map(lambda ps: np.prod(ps),self.partshapes)) +
+                   len(self.partshapes) * 4)
 
     def __repr__(self):
         return "%s(%r)" % (self.__class__, self.__dict__)
@@ -153,7 +144,7 @@ def vectortodpm(vector, dpmsize):
     filters = []
     offset = 0
 
-    for filtershape in [dpmsize.rootshape] + dpmsize.partshapes:
+    for filtershape in dpmsize.partshapes:
         filtersize = np.prod(filtershape)
         subvec = vector[offset:offset+filtersize]
         filters.append(subvec.reshape(filtershape, order='C'))
@@ -161,14 +152,12 @@ def vectortodpm(vector, dpmsize):
     
     deforms = []
     # Then just take the deformation coefficients 4 by 4
-    while offset < vector.size - 1:
+    while offset < vector.size:
         deforms.append(vector[offset:offset+4])
         offset = offset + 4
-    # and the bias is the last element
-    bias = vector[vector.size-1]
 
     # build the final DPM
-    return DPM(filters[0], filters[1:], dpmsize.anchors, deforms, bias)
+    return DPM(filters, dpmsize.anchors, deforms)
 
 def vectortomixture(vector, mixturesize):
     """ Converts a model vector to the corresponding mixture model.

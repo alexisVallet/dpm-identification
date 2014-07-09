@@ -57,9 +57,9 @@ def match_part(fmap, partfilter, anchor, deform):
                     of the center of the filter.
         deform      4D numpy vector of deformation coefficients.
     Returns:
-        (subwin, dx, dy) where:
+        (subwin, di, dj) where:
         - subwin is the best matching subwindow from the original feature map.
-        - dx, dy is the displacement from the anchor position to the subwindow.
+        - di, dj is the displacement from the anchor position to the subwindow.
     """
     # Compute the reponse of the filter.
     response = match_filter(fmap, partfilter)
@@ -78,8 +78,8 @@ def match_part(fmap, partfilter, anchor, deform):
     df, args = gdt2D(deform, paddedresp)
     # Get the optimal position by looking up the args array, taking into
     # account padding
-    anci, ancj = anchor
-    dx, dy = args[anci+padding, ancj+padding] - anchor
+    anci, ancj = anchor + np.array([padding,padding])
+    di, dj = args[anci, ancj] - np.array([anci, ancj])
     # Get the corresponding subwindow from am appropriately padded feature map.
     paddedmap = np.pad(
         fmap,
@@ -87,6 +87,6 @@ def match_part(fmap, partfilter, anchor, deform):
         mode='constant',
         constant_values=(0,)
     )
-    
-    
-    
+    partsize = partfilter.shape[0]
+
+    return (paddedmap[anci:anci+partsize,ancj:ancj+partsize], di, dj)
