@@ -6,6 +6,7 @@ import numpy as np
 import os
 from sklearn.metrics import roc_curve, roc_auc_score
 import matplotlib.pyplot as plt
+import cPickle as pickle
 
 from ioutils import load_data
 from partclassifier import BinaryPartClassifier
@@ -38,14 +39,14 @@ class TestPartClassifier(unittest.TestCase):
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
         classifier = BinaryPartClassifier(
-            0.01,
+            0.1,
             feature,
             mindimdiv,
             verbose=True,
             debug=True,
             algorithm='l-bfgs'
         )
-        label = 'asuka_langley'
+        label = 'monkey_d_luffy'
         positives = self.traindata[label]
         negatives = reduce(lambda l1,l2:l1+l2,
                            [self.traindata[l] for l in self.traindata
@@ -57,6 +58,11 @@ class TestPartClassifier(unittest.TestCase):
         cv2.namedWindow("learned part", cv2.WINDOW_NORMAL)
         cv2.imshow("learned part", partimage)
         cv2.waitKey(0)
+
+        print "caching..."
+        cachefile = open('data/dpmid-cache/test', 'w')
+        pickle.dump(classifier, cachefile)
+        cachefile.close()
 
         print "predicting..."
 
@@ -86,8 +92,6 @@ class TestPartClassifier(unittest.TestCase):
         for i in idxs:
             print "probability: " + repr(probas[i])
             image = np.array(testsamples[i])
-            (i1,j1,i2,j2) = classifier.matching_box(image)
-            cv2.rectangle(image, (j1,i1), (j2,i2), (0,0,255), 4)
             cv2.imshow("image", image)
             cv2.waitKey(0)
 

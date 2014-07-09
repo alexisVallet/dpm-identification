@@ -7,7 +7,7 @@ import cPickle as pickle
 import os
 
 class BinaryLLR:
-    def __init__(self, latent_function, C, verbose=False, 
+    def __init__(self, latent_function, C, latent_args=None, verbose=False, 
                  algorithm='l-bfgs'):
         """ Initializes the model with a specific function for latent
             computation.
@@ -29,6 +29,8 @@ class BinaryLLR:
                                in beta. Other convex functions may also
                                perform well.
             C                  soft margin parameter.
+            latent_args        additional arguments to (optionally) pass
+                               to the latent_function.
             verbose            true if you want information messages 
                                printed at regular intervals.
             algorithm          algorithm to use for optimizing the the 
@@ -41,6 +43,7 @@ class BinaryLLR:
         """
         assert algorithm in ['cg', 'bfgs', 'l-bfgs', 'ncg']
         self.latent_function = latent_function
+        self.latent_args = latent_args
         self.C = C
         self.verbose = verbose
         self.algorithm = algorithm
@@ -74,7 +77,8 @@ class BinaryLLR:
             # Cost function.
             latvec = self.latent_function(
                 biaslessmodel,
-                negatives[i]
+                negatives[i],
+                self.latent_args
             )
             biaslatvec = np.empty([nb_featuresp1])
             biaslatvec[0] = 1
@@ -131,7 +135,8 @@ class BinaryLLR:
         for i in range(len(negatives)):
             latvec = self.latent_function(
                 biaslessmodel, 
-                negatives[i]
+                negatives[i],
+                args=self.latent_args
             )
             modellatdot = (
                 np.vdot(latvec, biaslessmodel) 
@@ -174,7 +179,8 @@ class BinaryLLR:
         for i in range(len(negatives)):
             latvec = self.latent_function(
                 biaslessmodel,
-                negatives[i]
+                negatives[i],
+                self.latent_args
             )
             # Add up the bias to the latent vector.
             biaslatvec = np.empty([nb_featuresp1])
@@ -236,7 +242,8 @@ class BinaryLLR:
             for i in range(len(positives)):
                 latvec = self.latent_function(
                     currentmodel[1:nb_features+1],
-                    positives[i]
+                    positives[i],
+                    self.latent_args
                 )
                 poslatents[i,1:nb_features+1] = latvec
                 # bias
@@ -336,7 +343,7 @@ class BinaryLLR:
 
         biaslessmodel = self.model[1:]
         for i in range(nb_sample):
-            latvec = self.latent_function(biaslessmodel, samples[i])
+            latvec = self.latent_function(biaslessmodel, samples[i], self.latent_args)
             probas[i] = 1.0 / (1 + np.exp(
                 -np.vdot(biaslessmodel, latvec)
                 -self.model[0] # bias

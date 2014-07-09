@@ -46,13 +46,14 @@ class TestOneVSAll(unittest.TestCase):
         # Run training.
         nbbins = (4,4,4)
         initclassifier = lambda: BinaryPartClassifier(
-            0.01,
+            0.1,
             Feature('bgrhist', np.prod(nbbins), nbbins),
             10,
             verbose=False,
             debug=False,
             algorithm='l-bfgs'
         )
+        cachedir = 'data/dpmid-cache/test_onevall'
         onevall = OneVSAll(
             initclassifier,
             cachedir='data/dpmid-cache/',

@@ -27,6 +27,25 @@ def max_energy_subwindow(featmap, winsize):
     
     return (maxsubwin, maxanchor)
 
+def best_match(partmodel, featmap, args):
+    """ Returns the flattened subwindow of the feature map which maps 
+    the part filter best.
+    """
+    partsize, featdim, return_pos = args
+    part = partmodel.reshape(partsize, partsize, featdim)
+    (response, padded) = match_filter(featmap, part, return_padded=True)
+    maxi, maxj = np.unravel_index(
+        np.argmax(response),
+        response.shape
+    )
+    
+    subwin = padded[maxi:maxi+partsize,
+                    maxj:maxj+partsize].flatten('C')
+    if return_pos:
+        return (subwin, (maxi, maxj))
+    else:
+        return subwin
+        
 class BinaryPartClassifier:
     """ Classifier with a single, free-floating part over the images 
         - meaning there are no deformation costs. Mostly intended as a 
@@ -39,26 +58,7 @@ class BinaryPartClassifier:
         self.mindimdiv = mindimdiv
         self.verbose = verbose
         self.debug = debug
-        self.algorithm = algorithm
-
-    def best_match(self, partmodel, featmap, return_pos=False):
-        """ Returns the flattened subwindow of the feature map which maps 
-            the part filter best.
-        """
-        part = partmodel.reshape(self.partsize, self.partsize, 
-                                 self.feature.dimension)
-        (response, padded) = match_filter(featmap, part, return_padded=True)
-        maxi, maxj = np.unravel_index(
-            np.argmax(response),
-            response.shape
-        )
-        
-        subwin = padded[maxi:maxi+self.partsize,
-                        maxj:maxj+self.partsize].flatten('C')
-        if return_pos:
-            return (subwin, (maxi, maxj))
-        else:
-            return subwin
+        self.algorithm = algorithm    
 
     def tofeatmap(self, image):
         return compute_regular_featmap(image, self.feature, self.mindimdiv)
@@ -109,8 +109,10 @@ class BinaryPartClassifier:
         
         # Train a latent logistic regression on the feature maps with the
         # best match latent function.
-        self.llr = BinaryLLR(self.best_match, self.C, self.verbose, 
-                             self.algorithm)
+        self.llr = BinaryLLR(best_match, self.C, verbose=self.verbose, 
+                             algorithm=self.algorithm, 
+                             latent_args=(self.partsize, self.feature.dimension, 
+                                          False))
         self.llr.fit(posmaps, negmaps, initpart, 4)
         # For vizualisation, set the featmap to the resahped model vector.
         self.model_featmap = self.llr.model[1:].reshape(
