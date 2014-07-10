@@ -3,6 +3,7 @@
 import numpy as np
 import multiprocessing as mp
 from scipy.optimize import fmin_cg, fmin_l_bfgs_b, fmin_bfgs, fmin_ncg
+from ssm import ssm
 import cPickle as pickle
 import os
 
@@ -36,12 +37,11 @@ class BinaryLLR:
             algorithm          algorithm to use for optimizing the the 
                                cost function. Must be one of 'cg' for 
                                conjugate gradient, 'bfgs' for BFGS, 
-                               'l-bfgs' for L-BFGS or 'ncg' for the 
-                               Newton-CG method. Note that L-BFGS is 
-                               significantly more efficient in our 
-                               implementation.
+                               'l-bfgs' for L-BFGS, 'ncg' for the 
+                               Newton-CG method or 'ssm' for the
+                               stochastic subgradient method.
         """
-        assert algorithm in ['cg', 'bfgs', 'l-bfgs', 'ncg']
+        assert algorithm in ['cg', 'bfgs', 'l-bfgs', 'ncg', 'ssm']
         self.latent_function = latent_function
         self.latent_args = latent_args
         self.C = C
@@ -207,7 +207,54 @@ class BinaryLLR:
             print "gradient min: " + repr(gradient.min())
             print "gradient avg: " + repr(gradient.mean())
         return gradient
+
+    def cost_stochastic_subgradient(self, poslatents, negatives,
+                                    nb_batches, model, labelledsamples):
+        """ Compute a subgradient of the cost function 
+            on randomly selected samples at a given point.
+
+        Arguments:
+            nb_batches
+                     total number of roughly equal size batches the
+                     training set was split into.
+            model    model vector corresponding to the point at
+                     which we want to evaluate the cost subgradient.
+            labelledsamples
+                     array-like of (sampleidx, label) pairs where
+                     sampleidx is the index of the sample in the positives
+                     or negatives list, and the labels should be 1 for 
+                     positive samples, -1 for negative samples.
+        Returns:
+            a valid subgradient of the cost function at the given point.
+        """
+        innersum = 0
         
+        for labelledsample in labelledsamples:
+            (idx, label) = labelledsample
+            latvec = None
+            biaslessmodel = model[1:]
+            if label > 0 :
+                # If positive, get the precomputed latent vector.
+                latvec = poslatents[idx,:]
+            else:
+                # Otherwise, compute it.
+                latvec = np.empty([model.size])
+                latvec[1:] = self.latent_function(
+                    biaslessmodel, 
+                    negatives[idx],
+                    self.latent_args
+                )
+                latvec[0] = 1
+            innersum += (
+                -label * latvec 
+                / (1 + np.exp(label * np.vdot(model, latvec)))
+            )
+
+        zerobiasmodel = np.array(model)
+        zerobiasmodel[0] = 0
+
+        return zerobiasmodel + self.C * nb_batches * innersum
+
     def fit(self, positives, negatives, initmodel, nbiter=4):
         """ Fits the model against positive and negative samples
             given an initial model to optimize. It should be noted
@@ -316,6 +363,29 @@ class BinaryLLR:
                         full_output = True
                     )
                 )
+            elif self.algorithm=='ssm':
+                # Associate class labels to samples as the subgradient
+                # requires it. Simply pass around the indexes, which we
+                # will need to refer to positive latents anyway.
+                labelledsamples = (
+                    zip(range(len(positives)), [1] * len(positives)) +
+                    zip(range(len(negatives)), [-1] * len(negatives))
+                )
+                currentmodel = ssm(
+                    currentmodel,
+                    labelledsamples,
+                    lambda nb,m,b: self.cost_stochastic_subgradient(
+                        poslatents,
+                        negatives,
+                        nb,
+                        m,
+                        b
+                    ),
+                    verbose=self.verbose
+                )
+                # ssm doesn't actually detect convergence, we just
+                # run the maximum number of iterations.
+                warnflag = 1
             
             if self.verbose:
                 if warnflag == 0:

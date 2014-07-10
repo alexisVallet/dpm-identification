@@ -44,9 +44,9 @@ class TestPartClassifier(unittest.TestCase):
             mindimdiv,
             verbose=True,
             debug=True,
-            algorithm='l-bfgs'
+            algorithm='ssm'
         )
-        label = 'monkey_d_luffy'
+        label = 'asuka_langley'
         positives = self.traindata[label]
         negatives = reduce(lambda l1,l2:l1+l2,
                            [self.traindata[l] for l in self.traindata

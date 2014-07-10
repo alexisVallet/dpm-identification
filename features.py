@@ -221,3 +221,32 @@ def visualize_featmap(featuremap, featvis, blocksize=(32,32),
                      )
     
     return outimage
+def max_energy_subwindow(featmap, winsize):
+    """ Compute and return the highest energy subwindow of a given
+        square size in a feature map.
+
+    Arguments:
+        featmap    feature map to compute the highest energy subwindow
+                   of.
+        winsize    size of the window, i.e. the window will have size
+                   winsize columns by winsize rows.
+    Returns:
+        (maxsubwin, maxanchor) where maxsubwin is the subwindow of
+        maximum energy in the feature map, and maxanchor is the position
+        of the top-left of the window in the original feature map.
+    """
+    wrows, wcols, featdim = featmap.shape
+    maxanchor = None
+    maxsubwin = None
+    maxenergy = 0
+    
+    for i in range(wrows - winsize):
+        for j in range(wcols - winsize):
+            subwin = featmap[i:i+winsize,j:j+winsize]
+            energy = np.vdot(subwin, subwin)
+            if maxsubwin == None or maxenergy < energy:
+                maxanchor = (i,j)
+                maxenergy = energy
+                maxsubwin = subwin
+    
+    return (maxsubwin, maxanchor)
