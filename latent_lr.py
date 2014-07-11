@@ -148,8 +148,6 @@ class BinaryLLR:
         # Exclude bias from regularization.
         cost = 0.5 * np.vdot(biaslessmodel,biaslessmodel) + self.C * innersum
 
-        if self.verbose:
-            print "cost: " + repr(cost)
         return cost
 
     def cost_gradient(self, negatives, poslatents, model):
@@ -199,13 +197,6 @@ class BinaryLLR:
         zerobiasmodel[1:nb_featuresp1] = biaslessmodel
         gradient = zerobiasmodel + self.C * innersum
 
-        if self.verbose:
-            print "model norm: " + repr(np.linalg.norm(model))
-            print "gradient size: " + repr(gradient.size)
-            print "gradient norm: " + repr(np.linalg.norm(gradient))
-            print "gradient max: " + repr(gradient.max()) + " at " + repr(gradient.argmax())
-            print "gradient min: " + repr(gradient.min())
-            print "gradient avg: " + repr(gradient.mean())
         return gradient
 
     def cost_stochastic_subgradient(self, poslatents, negatives,
@@ -380,6 +371,11 @@ class BinaryLLR:
                         nb,
                         m,
                         b
+                    ),
+                    f=lambda m: self.cost_function(
+                        negatives,
+                        poslatents,
+                        m
                     ),
                     verbose=self.verbose
                 )

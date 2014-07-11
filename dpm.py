@@ -3,6 +3,8 @@
 import numpy as np
 import cv2
 
+import features as feat
+
 class DPM:
     def __init__(self, parts, anchors, deforms):
         """ Initializes a deformable parts model with no root and a
@@ -61,8 +63,54 @@ class DPM:
     def toimages(self, featvis):
         """ Returns images for the root and for each part.
         """
-        return map(lambda fmap: feat.visualize_featmap(fmap, featvis), 
-                   [self.root] + self.parts)
+        return map(
+            lambda fmap: feat.visualize_featmap(
+                fmap, 
+                featvis,
+                blocksize=(1,1)), 
+            self.parts)
+
+    def partsimage(self, featvis):
+        partimages = self.toimages(featvis)
+        # Place the parts in a black image. First need to determine
+        # the size needed.
+        mini = np.inf
+        maxi = -np.inf
+        minj = np.inf
+        maxj = -np.inf
+
+        for i in range(len(self.parts)):
+            anci, ancj = self.anchors[i]
+            prows, pcols = self.parts[i].shape[0:2]
+            mini = min(mini, anci)
+            maxi = max(maxi, anci + prows)
+            minj = min(minj, ancj)
+            maxj = max(maxj, ancj + pcols)
+
+        image = np.zeros([maxi - mini + 1, maxj - minj + 1, 3], np.float32)
+        # Then place the parts one by one.
+        for i in range(len(self.parts)):
+            anci, ancj = self.anchors[i] - np.array([mini, minj])
+            imrows, imcols = partimages[i].shape[0:2]
+            image[anci:anci+imrows, ancj:ancj+imcols] = partimages[i]
+
+        # Resize and draw rectangles so one can see parts better.
+        resized = cv2.resize(
+            image, None, fx=32, fy=32, 
+            interpolation=cv2.INTER_NEAREST
+        )
+        for i in range(len(self.parts)):
+            anci, ancj = (self.anchors[i] - np.array([mini, minj])) * 32
+            rrows, rcols = np.array(partimages[i].shape[0:2]) * 32
+            cv2.rectangle(
+                resized, 
+                (ancj, anci), 
+                (ancj + rcols, anci + rrows),
+                (0,1,0),
+                4
+            )
+
+        return resized
 
     def __repr__(self):
         return repr(self.size())                    

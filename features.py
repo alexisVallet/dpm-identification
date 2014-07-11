@@ -159,7 +159,7 @@ def histvis(bounds, hist_):
     # interested in, so we drop it. We then take the square of each
     # feature.
     hist = hist_.copy()
-    hist[hist < hist.mean()] = 0
+    hist[hist < 0] = 0
     hist = np.multiply(hist, hist)
     lbins, abins, bbins = hist.shape
     lbounds, abounds, bbounds = bounds
@@ -221,6 +221,7 @@ def visualize_featmap(featuremap, featvis, blocksize=(32,32),
                      )
     
     return outimage
+
 def max_energy_subwindow(featmap, winsize):
     """ Compute and return the highest energy subwindow of a given
         square size in a feature map.
@@ -249,4 +250,4 @@ def max_energy_subwindow(featmap, winsize):
                 maxenergy = energy
                 maxsubwin = subwin
     
-    return (maxsubwin, maxanchor)
+    return (np.array(maxsubwin, copy=True), maxanchor)

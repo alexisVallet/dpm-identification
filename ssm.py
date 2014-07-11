@@ -3,7 +3,7 @@
 """
 import numpy as np
 
-def ssm(init, samples, f_subgrad, nb_iter=50, nb_batches=None, 
+def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None, 
         alpha_0=0.8, alpha_end=10E-5, verbose=False):
     """ Minimizes a convex non-differentiable function on a set of samples
         using the stochastic subgradient method.
@@ -17,6 +17,9 @@ def ssm(init, samples, f_subgrad, nb_iter=50, nb_batches=None,
                     a n-dimensional vector, and subset is an array-like of
                     elements from the input samples, should return a 
                     n-dimensional subgradient of the function to minimize.
+        f           function to minimize. Not actually needed, but if
+                    provided its value will be displayed after each
+                    epoch if verbose is True.
         nb_iter     number of iterations to run, e.g. number of time we go
                     through the entire dataset.
         nb_batches  number of batches to split the dataset into for 
@@ -70,5 +73,6 @@ def ssm(init, samples, f_subgrad, nb_iter=50, nb_batches=None,
                 "Average subgradient norm: " 
                 + repr(avgsubgradnorm / nb_batches)
             )
+            print "Cost: " + repr(f(model))
     
     return model
