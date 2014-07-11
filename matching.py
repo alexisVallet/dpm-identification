@@ -74,8 +74,10 @@ def match_part(fmap, partfilter, anchor, deform):
         constant_values=(0,)
     )
     # Run GDT to compute score taking deformations into account and optimal
-    # displacement.
-    df, args = gdt2D(deform, paddedresp)
+    # displacement. GDT expects deformation costs in dx, dy, dx^2, dy^2
+    # format so we switch things around in deform accordingly.
+    dy, dx, dy2, dx2 = deform
+    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), paddedresp)
     # Get the optimal position by looking up the args array, taking into
     # account padding
     anci, ancj = anchor + np.array([padding,padding])

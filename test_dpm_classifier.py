@@ -37,14 +37,14 @@ class TestDPMClassifier(unittest.TestCase):
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
         C = 0.1
-        nbparts = 6
+        nbparts = 2
         classifier = BinaryDPMClassifier(
             C,
             feature,
             mindimdiv,
             nbparts,
-            verbose=False,
-            debug=False
+            verbose=True,
+            debug=True
         )
         label = 'rei_ayanami'
         positives = self.traindata[label]

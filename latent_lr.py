@@ -3,9 +3,39 @@
 import numpy as np
 import multiprocessing as mp
 from scipy.optimize import fmin_cg, fmin_l_bfgs_b, fmin_bfgs, fmin_ncg
-from ssm import ssm
 import cPickle as pickle
 import os
+import theano
+import theano.tensor as T
+from theano.nnet import softplus
+
+from ssm import ssm
+
+# Should put all this crap in the constructor -_- .
+# Symbolic theano expressions for the cost function and its subgradient
+# with fixed latent vectors. The latent vectors themselves will be of
+# of course recomputed in the case of negative samples as a preprocessing
+# step.
+# Beta is the model vector.
+beta = T.vector('beta')
+# Phi is the matrix of precomputed latent vectors for beta as rows.
+phi = T.matrix('phi')
+# y is the vector of class labels.
+y = T.vector('y', dtype='int32')
+# Elementwise log loss, taking advantage of theano's softplus.
+log_loss = softplus(T.dot(-y, T.dot(phi, beta)))
+# beta0 is the model beta with bias coefficient zeroed out.
+beta0 = T.set_subtensor(beta[0], 0)
+# C will be the soft margin parameter.
+C = T.scalar('C')
+# Cost function. In this case, phi should contain all the latent vectors,
+# and y all the corresponding labels.
+cost = 0.5 * T.dot(beta0, beta0) + C * T.sum(log_loss)
+# Stochastic subgradient of the cost function. m will be the number of
+# mini-batches. In this case, phi should hold only the latent vectors of
+# the samples in the mini-batch, and y only the corresponding labels.
+m = T.scalar('m', dtype='int32')
+cost_subgrad = beta0 + C * m * T.grad(T.sum(log_loss), beta)
 
 class BinaryLLR:
     def __init__(self, latent_function, C, latent_args=None, verbose=False, 
@@ -64,12 +94,9 @@ class BinaryLLR:
             # Cost function.
             latvec = poslatents[i,:]
             modellatdot = np.vdot(model, latvec)
-            costinnersum += np.log(1 + np.exp(-modellatdot))
+            costinnersum += log_loss(-modellatdot)
             # Gradient.
-            gradinnersum -= (
-                (1.0 / (1 + np.exp(modellatdot)))
-                * latvec
-            )
+            gradinnersum -= log_loss_grad(-modellatdot) * latvec
         # Compute latent value and add up logistic loss for negative
         # samples.
         biaslessmodel = model[1:nb_featuresp1]
@@ -84,12 +111,9 @@ class BinaryLLR:
             biaslatvec[0] = 1
             biaslatvec[1:nb_featuresp1] = latvec
             modellatdot = np.vdot(model, biaslatvec)
-            costinnersum += np.log(1 + np.exp(modellatdot))
+            costinnersum += log_loss(modellatdot)
             # Gradient.
-            gradinnersum += (
-                (1.0 / (1 + np.exp(-modellatdot)))
-                * biaslatvec
-            )
+            gradinnersum += log_loss_grad(modellatdot) * biaslatvec
         # Regularize and return. Ignore the bias for regularization.
         # Exclude bias from regularization.
         zerobiasmodel = np.empty([nb_featuresp1])
@@ -128,7 +152,9 @@ class BinaryLLR:
 
         # Add up logistic loss for positive samples.
         for i in range(nb_pos):
-            innersum += np.log(1 + np.exp(-np.vdot(model, poslatents[i,:])))
+            latvec = poslatents[i,:]
+            modellatdot = np.vdot(model, latvec)
+            innersum += log_loss(-modellatdot)
         # Compute latent value and add up logistic loss for negative
         # samples.
         biaslessmodel = model[1:nb_featuresp1]
@@ -142,62 +168,13 @@ class BinaryLLR:
                 np.vdot(latvec, biaslessmodel) 
                 + model[0] # add up the bias
             )
-            innersum += np.log(1 + np.exp(modellatdot))
+            innersum += log_loss(modellatdot)
         
         # Regularize and return.
         # Exclude bias from regularization.
         cost = 0.5 * np.vdot(biaslessmodel,biaslessmodel) + self.C * innersum
 
         return cost
-
-    def cost_gradient(self, negatives, poslatents, model):
-        """ Computes the gradient of the cost function at a given
-            point.
-
-        Arguments:
-            negatives  negative samples to compute the cost function on.
-            poslatents matrix of latent vectors as rows for positive
-                       samples.
-            model      model vector to compute the cost for.
-        """
-        nb_pos = poslatents.shape[0]
-        nb_samples = nb_pos + len(negatives)
-        nb_featuresp1 = model.size
-        innersum = np.zeros([nb_featuresp1])
-
-        # Compute gradient for positive samples.
-        for i in range(nb_pos):
-            latvec = poslatents[i,:]
-            innersum += (
-                (1.0 / (1 + np.exp(np.vdot(model, latvec))))
-                * latvec
-            )
-        # Compute latent vector and gradient for negative samples.
-        biaslessmodel = model[1:nb_featuresp1]
-        for i in range(len(negatives)):
-            latvec = self.latent_function(
-                biaslessmodel,
-                negatives[i],
-                self.latent_args
-            )
-            # Add up the bias to the latent vector.
-            biaslatvec = np.empty([nb_featuresp1])
-            biaslatvec[0] = 1
-            biaslatvec[1:nb_featuresp1] = latvec
-            modellatdot = np.vdot(model, biaslatvec)
-            innersum -= (
-                (1.0 / (1 + np.exp(-modellatdot)))
-                * biaslatvec
-            )
-        
-        # Add up the gradient of the regularization term.
-        # Exclude bias from regularization.
-        zerobiasmodel = np.empty([nb_featuresp1])
-        zerobiasmodel[0] = 0
-        zerobiasmodel[1:nb_featuresp1] = biaslessmodel
-        gradient = zerobiasmodel + self.C * innersum
-
-        return gradient
 
     def cost_stochastic_subgradient(self, poslatents, negatives,
                                     nb_batches, model, labelledsamples):
@@ -237,8 +214,7 @@ class BinaryLLR:
                 )
                 latvec[0] = 1
             innersum += (
-                -label * latvec 
-                / (1 + np.exp(label * np.vdot(model, latvec)))
+                -label * latvec * log_loss_grad(.exp(label * np.vdot(model, latvec)))
             )
 
         zerobiasmodel = np.array(model)
