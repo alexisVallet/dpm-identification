@@ -32,7 +32,7 @@ def _best_match(dpm, featmap):
         lambda i: match_part(
             featmap, 
             dpm.parts[i], 
-            dpm.anchors[i],
+            dpm.anchors[i][::-1], # Switch anchor to x,y format.
             dpm.deforms[i]
         ),
         range(len(dpm.parts))
