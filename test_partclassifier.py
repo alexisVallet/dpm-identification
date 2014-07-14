@@ -43,8 +43,7 @@ class TestPartClassifier(unittest.TestCase):
             feature,
             mindimdiv,
             verbose=True,
-            debug=True,
-            algorithm='ssm'
+            debug=True
         )
         label = 'asuka_langley'
         positives = self.traindata[label]
