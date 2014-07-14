@@ -3,13 +3,20 @@
 import numpy as np
 import multiprocessing as mp
 from scipy.optimize import fmin_cg, fmin_l_bfgs_b, fmin_bfgs, fmin_ncg
-from ssm import ssm
 import cPickle as pickle
 import os
+import theano
+import theano.tensor as T
+from theano.tensor.nnet import softplus
+
+from ssm import ssm
+
+# Should put all this crap in the constructor -_- .
+
 
 class BinaryLLR:
-    def __init__(self, latent_function, C, latent_args=None, verbose=False, 
-                 algorithm='l-bfgs'):
+    def __init__(self, latent_function, C, latent_args=None, 
+                 verbose=False):
         """ Initializes the model with a specific function for latent
             computation.
 
@@ -34,86 +41,55 @@ class BinaryLLR:
                                to the latent_function.
             verbose            true if you want information messages 
                                printed at regular intervals.
-            algorithm          algorithm to use for optimizing the the 
-                               cost function. Must be one of 'cg' for 
-                               conjugate gradient, 'bfgs' for BFGS, 
-                               'l-bfgs' for L-BFGS, 'ncg' for the 
-                               Newton-CG method or 'ssm' for the
-                               stochastic subgradient method.
         """
-        assert algorithm in ['cg', 'bfgs', 'l-bfgs', 'ncg', 'ssm']
         self.latent_function = latent_function
         self.latent_args = latent_args
         self.C = C
         self.verbose = verbose
-        self.algorithm = algorithm
-
-    def cost_function_and_grad(self, negatives, poslatents, model):
-        """ Compute function value and gradient in one go. About twice
-            more efficient thant calling cost_function and cost_gradient
-            separately.
-        """
-        nb_pos = poslatents.shape[0]
-        nb_samples = nb_pos + len(negatives)
-        nb_featuresp1 = model.size
-        costinnersum = 0
-        gradinnersum = np.zeros([nb_featuresp1])
-
-        # Add up logistic loss for positive samples.
-        for i in range(nb_pos):
-            # Cost function.
-            latvec = poslatents[i,:]
-            modellatdot = np.vdot(model, latvec)
-            costinnersum += np.log(1 + np.exp(-modellatdot))
-            # Gradient.
-            gradinnersum -= (
-                (1.0 / (1 + np.exp(modellatdot)))
-                * latvec
+        # Symbolic theano expressions for the cost function and its 
+        # subgradient with fixed latent vectors. The latent vectors 
+        # themselves will be of recomputed in the case of negative samples 
+        # as a preprocessing step.
+        # Beta is the model vector.
+        self.beta = T.vector('beta')
+        # Phi is the matrix of precomputed latent vectors for beta as rows.
+        self.phi = T.matrix('phi')
+        # y is the vector of class labels.
+        self.y = T.vector('y', dtype='int32')
+        # Elementwise log loss, taking advantage of theano's softplus.
+        log_loss = softplus(T.dot(-self.y, T.dot(self.phi, self.beta)))
+        # beta0 is the model beta with bias coefficient zeroed out.
+        beta0 = T.set_subtensor(self.beta[0], 0)
+        # Cost function. In this case, phi should contain all the latent 
+        # vectors, and y all the corresponding labels.
+        self.cost_sym = (
+            0.5 * T.dot(beta0, beta0) + self.C * T.sum(log_loss)
+        )
+        self.cost = theano.function(
+            [self.beta, self.phi, self.y], 
+            self.cost_sym
+        )
+        if verbose:
+            print "Cost function: " + theano.pp(self.cost_sym)
+        # Stochastic subgradient of the cost function. m will be the 
+        # number of mini-batches. In this case, phi should hold only the 
+        # latent vectors of the samples in the mini-batch, and y only the 
+        # corresponding labels.
+        self.m = T.scalar('m', dtype='int32')
+        self.cost_subgrad_sym = (
+            beta0 + C * self.m * T.grad(T.sum(log_loss), self.beta)
+        )
+        self.cost_subgrad = theano.function(
+            [self.beta, self.phi, self.y, self.m],
+            self.cost_subgrad_sym
+        )
+        if verbose:
+            print (
+                "Stochastic subgradient: " 
+                + theano.pp(self.cost_subgrad_sym)
             )
-        # Compute latent value and add up logistic loss for negative
-        # samples.
-        biaslessmodel = model[1:nb_featuresp1]
-        for i in range(len(negatives)):
-            # Cost function.
-            latvec = self.latent_function(
-                biaslessmodel,
-                negatives[i],
-                self.latent_args
-            )
-            biaslatvec = np.empty([nb_featuresp1])
-            biaslatvec[0] = 1
-            biaslatvec[1:nb_featuresp1] = latvec
-            modellatdot = np.vdot(model, biaslatvec)
-            costinnersum += np.log(1 + np.exp(modellatdot))
-            # Gradient.
-            gradinnersum += (
-                (1.0 / (1 + np.exp(-modellatdot)))
-                * biaslatvec
-            )
-        # Regularize and return. Ignore the bias for regularization.
-        # Exclude bias from regularization.
-        zerobiasmodel = np.empty([nb_featuresp1])
-        zerobiasmodel[0] = 0
-        zerobiasmodel[1:nb_featuresp1] = biaslessmodel
-        cost = 0.5 * np.vdot(biaslessmodel, biaslessmodel) + self.C * costinnersum
-        gradient = zerobiasmodel + self.C * gradinnersum
-
-        if self.verbose:
-            print "cost: " + repr(cost)
-            print "model norm: " + repr(np.linalg.norm(model))
-            print "gradient size: " + repr(gradient.size)
-            print "gradient norm: " + repr(np.linalg.norm(gradient))
-            print "gradient max: " + repr(gradient.max()) + " at " + repr(gradient.argmax())
-            print "gradient min: " + repr(gradient.min())
-            print "gradient avg: " + repr(gradient.mean())
-
-        return (cost, gradient)
-
     def cost_function(self, negatives, poslatents, model):
-        """ Computes the logistic cost function. Runs in
-            time O(p + n * l) where l is the the runtime of
-            the latent vector function, p is the number of
-            positive samples and n is the number of negative samples.
+        """ Computes the logistic cost function.
         
         Arguments:
             negatives  negative samples to compute the cost function on.
@@ -121,83 +97,26 @@ class BinaryLLR:
                        samples.
             model      model vector to compute the cost for.
         """
-        nb_pos = poslatents.shape[0]
-        nb_samples = nb_pos + len(negatives)
-        nb_featuresp1 = model.size
-        innersum = 0
-
-        # Add up logistic loss for positive samples.
-        for i in range(nb_pos):
-            innersum += np.log(1 + np.exp(-np.vdot(model, poslatents[i,:])))
-        # Compute latent value and add up logistic loss for negative
-        # samples.
-        biaslessmodel = model[1:nb_featuresp1]
+        # Put latent vectors in a data structure suitable for Theano.
+        nb_pos, nb_featuresp1 = poslatents.shape[0:2]
+        latents = np.empty([nb_pos + len(negatives), nb_featuresp1])
+        latents[0:nb_pos] = poslatents
+        biaslessmodel = model[1:]
         for i in range(len(negatives)):
-            latvec = self.latent_function(
-                biaslessmodel, 
-                negatives[i],
-                args=self.latent_args
-            )
-            modellatdot = (
-                np.vdot(latvec, biaslessmodel) 
-                + model[0] # add up the bias
-            )
-            innersum += np.log(1 + np.exp(modellatdot))
-        
-        # Regularize and return.
-        # Exclude bias from regularization.
-        cost = 0.5 * np.vdot(biaslessmodel,biaslessmodel) + self.C * innersum
-
-        return cost
-
-    def cost_gradient(self, negatives, poslatents, model):
-        """ Computes the gradient of the cost function at a given
-            point.
-
-        Arguments:
-            negatives  negative samples to compute the cost function on.
-            poslatents matrix of latent vectors as rows for positive
-                       samples.
-            model      model vector to compute the cost for.
-        """
-        nb_pos = poslatents.shape[0]
-        nb_samples = nb_pos + len(negatives)
-        nb_featuresp1 = model.size
-        innersum = np.zeros([nb_featuresp1])
-
-        # Compute gradient for positive samples.
-        for i in range(nb_pos):
-            latvec = poslatents[i,:]
-            innersum += (
-                (1.0 / (1 + np.exp(np.vdot(model, latvec))))
-                * latvec
-            )
-        # Compute latent vector and gradient for negative samples.
-        biaslessmodel = model[1:nb_featuresp1]
-        for i in range(len(negatives)):
-            latvec = self.latent_function(
+            # Compute the latent vector.
+            latents[nb_pos+i,1:] = self.latent_function(
                 biaslessmodel,
                 negatives[i],
                 self.latent_args
             )
-            # Add up the bias to the latent vector.
-            biaslatvec = np.empty([nb_featuresp1])
-            biaslatvec[0] = 1
-            biaslatvec[1:nb_featuresp1] = latvec
-            modellatdot = np.vdot(model, biaslatvec)
-            innersum -= (
-                (1.0 / (1 + np.exp(-modellatdot)))
-                * biaslatvec
-            )
-        
-        # Add up the gradient of the regularization term.
-        # Exclude bias from regularization.
-        zerobiasmodel = np.empty([nb_featuresp1])
-        zerobiasmodel[0] = 0
-        zerobiasmodel[1:nb_featuresp1] = biaslessmodel
-        gradient = zerobiasmodel + self.C * innersum
+        # Set biases for negative latent vectors.
+        latents[nb_pos:,0] = 1
+        # Set up labels.
+        labels = np.empty([nb_pos + len(negatives)], dtype=np.int32)
+        labels[0:nb_pos] = 1
+        labels[nb_pos:] = -1
 
-        return gradient
+        return self.cost(model, latents, labels)
 
     def cost_stochastic_subgradient(self, poslatents, negatives,
                                     nb_batches, model, labelledsamples):
@@ -218,33 +137,28 @@ class BinaryLLR:
         Returns:
             a valid subgradient of the cost function at the given point.
         """
-        innersum = 0
+        # Set up data structure for Theano.
+        nb_featuresp1 = model.size
+        nb_samples = len(labelledsamples)
+        latents = np.empty([nb_samples, nb_featuresp1])
+        labels = np.empty([nb_samples], dtype=np.int32)
+        biaslessmodel = model[1:]
         
-        for labelledsample in labelledsamples:
-            (idx, label) = labelledsample
-            latvec = None
-            biaslessmodel = model[1:]
-            if label > 0 :
-                # If positive, get the precomputed latent vector.
-                latvec = poslatents[idx,:]
+        for i in range(nb_samples):
+            (idx, label) = labelledsamples[i]
+            if label > 0:
+                latents[i] = poslatents[idx]
+                labels[i] = 1
             else:
-                # Otherwise, compute it.
-                latvec = np.empty([model.size])
-                latvec[1:] = self.latent_function(
-                    biaslessmodel, 
+                latents[i,1:] = self.latent_function(
+                    biaslessmodel,
                     negatives[idx],
                     self.latent_args
                 )
-                latvec[0] = 1
-            innersum += (
-                -label * latvec 
-                / (1 + np.exp(label * np.vdot(model, latvec)))
-            )
-
-        zerobiasmodel = np.array(model)
-        zerobiasmodel[0] = 0
-
-        return zerobiasmodel + self.C * nb_batches * innersum
+                latents[i,0] = 1
+                labels[i] = -1
+        
+        return self.cost_subgrad(model, latents, labels, nb_batches)
 
     def fit(self, positives, negatives, initmodel, nbiter=4):
         """ Fits the model against positive and negative samples
@@ -290,106 +204,30 @@ class BinaryLLR:
                 print "Optimizing the cost function for fixed positive latents..."
             # Optimizes the cost function for the fixed positive
             # latent vectors.
-            warnflag = None
-            if self.algorithm=='l-bfgs':
-                currentmodel, fopt, d = (
-                    fmin_l_bfgs_b(
-                        lambda m: self.cost_function_and_grad(
-                            negatives,
-                            poslatents,
-                            m
-                        ),
-                        currentmodel
-                    )
-                )
-                warnflag = d['warnflag']
-            elif self.algorithm=='cg':
-                currentmodel, fopt, fcalls, gcalls, warnflag = (
-                    fmin_cg(
-                        lambda m: self.cost_function(
-                            negatives,
-                            poslatents,
-                            m
-                        ),
-                        currentmodel,
-                        lambda m: self.cost_gradient(
-                            negatives,
-                            poslatents,
-                            m
-                        ),
-                        full_output=True
-                    )
-                )
-            elif self.algorithm=='bfgs':
-                currentmodel, fopt, gopt, Bopt, fcalls, gcalls, warnflag = (
-                    fmin_bfgs(
-                        lambda m: self.cost_function(
-                            negatives,
-                            poslatents,
-                            m
-                        ),
-                        currentmodel,
-                        lambda m: self.cost_gradient(
-                            negatives,
-                            poslatents,
-                            m
-                        ),
-                        full_output=True
-                    )
-                )
-            elif self.algorithm=='ncg':
-                currentmodel, fopt, fcalls, gcalls, hcalls, warnflag = (
-                    fmin_ncg(
-                        lambda m: self.cost_function(
-                            negatives,
-                            poslatents,
-                            m
-                        ),
-                        currentmodel,
-                        lambda m: self.cost_gradient(
-                            negatives,
-                            poslatents,
-                            m
-                        ),
-                        full_output = True
-                    )
-                )
-            elif self.algorithm=='ssm':
-                # Associate class labels to samples as the subgradient
-                # requires it. Simply pass around the indexes, which we
-                # will need to refer to positive latents anyway.
-                labelledsamples = (
-                    zip(range(len(positives)), [1] * len(positives)) +
-                    zip(range(len(negatives)), [-1] * len(negatives))
-                )
-                currentmodel = ssm(
-                    currentmodel,
-                    labelledsamples,
-                    lambda nb,m,b: self.cost_stochastic_subgradient(
-                        poslatents,
-                        negatives,
-                        nb,
-                        m,
-                        b
-                    ),
-                    f=lambda m: self.cost_function(
-                        negatives,
-                        poslatents,
-                        m
-                    ),
-                    verbose=self.verbose
-                )
-                # ssm doesn't actually detect convergence, we just
-                # run the maximum number of iterations.
-                warnflag = 1
-            
-            if self.verbose:
-                if warnflag == 0:
-                    print "Successfully converged."
-                elif warnflag == 1:
-                    print "Maximum number of iterations reached."
-                else:
-                    print "Gradient and/or cost were not changing."
+            # Associate class labels to samples as the subgradient
+            # requires it. Simply pass around the indexes, which we
+            # will need to refer to positive latents anyway.
+            labelledsamples = (
+                zip(range(len(positives)), [1] * len(positives)) +
+                zip(range(len(negatives)), [-1] * len(negatives))
+            )
+            currentmodel = ssm(
+                currentmodel,
+                labelledsamples,
+                lambda nb,m,b: self.cost_stochastic_subgradient(
+                    poslatents,
+                    negatives,
+                    nb,
+                    m,
+                    b
+                ),
+                f=lambda m: self.cost_function(
+                    negatives,
+                    poslatents,
+                    m
+                ),
+                verbose=self.verbose
+            )
 
         # Saves the results.
         self.model = currentmodel

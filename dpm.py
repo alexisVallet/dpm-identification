@@ -112,6 +112,30 @@ class DPM:
 
         return resized
 
+    def deforms_images(self):
+        def _deforms_image(i):
+            # Plot the deformation function across a patch
+            # corresponding to the size of the part, with
+            # origin at the center.
+            prows, pcols = self.parts[i].shape[0:2]
+            plot = np.empty([prows*2, pcols*2], np.float32)
+            cdi, cdj, cdi2, cdj2 = self.deforms[i]
+            
+            for i in range(prows*2):
+                for j in range(pcols*2):
+                    di = i - prows
+                    dj = j - pcols
+                    plot[i,j] = cdi*di + cdj*dj + cdi*di**2 + cdj*dj**2
+
+            # Normalize to [0;1] range.
+            plot = (plot - plot.min()) / (plot.max() - plot.min())
+            # 1 minus plot so black is high cost and white is low cost.
+            plot = 1 - plot
+            
+            return plot
+
+        return map(_deforms_image, range(len(self.parts)))
+
     def __repr__(self):
         return repr(self.size())                    
 

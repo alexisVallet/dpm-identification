@@ -35,14 +35,12 @@ class BinaryPartClassifier:
         - meaning there are no deformation costs. Mostly intended as a 
         test case for the LLR implementation.
     """
-    def __init__(self, C, feature, mindimdiv, verbose=False, debug=False,
-                 algorithm=None):
+    def __init__(self, C, feature, mindimdiv, verbose=False, debug=False):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.verbose = verbose
         self.debug = debug
-        self.algorithm = algorithm    
 
     def tofeatmap(self, image):
         return compute_regular_featmap(image, self.feature, self.mindimdiv)
@@ -83,10 +81,10 @@ class BinaryPartClassifier:
         
         # Train a latent logistic regression on the feature maps with the
         # best match latent function.
-        self.llr = BinaryLLR(_best_match, self.C, verbose=self.verbose, 
-                             algorithm=self.algorithm, 
-                             latent_args=(self.partsize, self.feature.dimension, 
-                                          False))
+        self.llr = BinaryLLR(
+            _best_match, self.C, verbose=self.verbose,
+            latent_args=(self.partsize, self.feature.dimension, False)
+        )
         self.llr.fit(posmaps, negmaps, initpart, 4)
         # For vizualisation, set the featmap to the resahped model vector.
         self.model_featmap = self.llr.model[1:].reshape(
