@@ -4,7 +4,7 @@
 import numpy as np
 
 def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None, 
-        alpha_0=0.8, alpha_end=10E-5, verbose=False):
+        alpha_0=0.8, alpha_end=10E-3, verbose=False):
     """ Minimizes a convex non-differentiable function on a set of samples
         using the stochastic subgradient method.
 
@@ -24,7 +24,7 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
                     through the entire dataset.
         nb_batches  number of batches to split the dataset into for 
                     subgradient evaluation. If non specified or None, will
-                    default to batches of size 10. If 1, this essentially
+                    default to batches of size 5. If 1, this essentially
                     becomes the non-stochastic subgradient method.
         alpha_0     initial learning rate.
         alpha_end   learning for the final iteration. The learning rate 
@@ -35,7 +35,7 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
     # Check parameters.
     assert nb_iter >= 1
     if nb_batches == None:
-        nb_batches = max(1, len(samples) // 10)
+        nb_batches = max(1, len(samples) // 5)
     assert 1 <= nb_batches <= len(samples)
     assert alpha_end <= alpha_0
     
@@ -62,7 +62,7 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
             batch = [samples[idx] for idx 
                      in shuffledidxs[thresh[i]:thresh[i+1]]]
             # Compute the subgradient at the current point.
-            subgrad = f_subgrad(nb_batches, model, batch)
+            subgrad = f_subgrad(model, batch)
             # Update the current model using the subgradient.
             model = model - alpha * subgrad
             avgsubgradnorm += np.linalg.norm(subgrad)

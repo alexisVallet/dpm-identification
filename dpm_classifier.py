@@ -153,8 +153,7 @@ class BinaryDPMClassifier:
             _best_match_wrapper,
             C=self.C, 
             latent_args={'modelsize': modelsize},
-            verbose=self.verbose,
-            algorithm='ssm'
+            verbose=self.verbose
         )
         self.llr.fit(posmaps, negmaps, initdpm.tovector())
         # For vizualisation, compute the trained DPM

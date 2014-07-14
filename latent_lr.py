@@ -11,9 +11,6 @@ from theano.tensor.nnet import softplus
 
 from ssm import ssm
 
-# Should put all this crap in the constructor -_- .
-
-
 class BinaryLLR:
     def __init__(self, latent_function, C, latent_args=None, 
                  verbose=False):
@@ -57,7 +54,7 @@ class BinaryLLR:
         # y is the vector of class labels.
         self.y = T.vector('y', dtype='int32')
         # Elementwise log loss, taking advantage of theano's softplus.
-        log_loss = softplus(T.dot(-self.y, T.dot(self.phi, self.beta)))
+        log_loss = softplus(T.dot(-T.diag(self.y), T.dot(self.phi, self.beta)))
         # beta0 is the model beta with bias coefficient zeroed out.
         beta0 = T.set_subtensor(self.beta[0], 0)
         # Cost function. In this case, phi should contain all the latent 
@@ -75,12 +72,9 @@ class BinaryLLR:
         # number of mini-batches. In this case, phi should hold only the 
         # latent vectors of the samples in the mini-batch, and y only the 
         # corresponding labels.
-        self.m = T.scalar('m', dtype='int32')
-        self.cost_subgrad_sym = (
-            beta0 + C * self.m * T.grad(T.sum(log_loss), self.beta)
-        )
+        self.cost_subgrad_sym = T.grad(self.cost_sym, self.beta)
         self.cost_subgrad = theano.function(
-            [self.beta, self.phi, self.y, self.m],
+            [self.beta, self.phi, self.y],
             self.cost_subgrad_sym
         )
         if verbose:
@@ -88,6 +82,7 @@ class BinaryLLR:
                 "Stochastic subgradient: " 
                 + theano.pp(self.cost_subgrad_sym)
             )
+
     def cost_function(self, negatives, poslatents, model):
         """ Computes the logistic cost function.
         
@@ -119,14 +114,11 @@ class BinaryLLR:
         return self.cost(model, latents, labels)
 
     def cost_stochastic_subgradient(self, poslatents, negatives,
-                                    nb_batches, model, labelledsamples):
+                                    model, labelledsamples):
         """ Compute a subgradient of the cost function 
             on randomly selected samples at a given point.
 
         Arguments:
-            nb_batches
-                     total number of roughly equal size batches the
-                     training set was split into.
             model    model vector corresponding to the point at
                      which we want to evaluate the cost subgradient.
             labelledsamples
@@ -158,7 +150,7 @@ class BinaryLLR:
                 latents[i,0] = 1
                 labels[i] = -1
         
-        return self.cost_subgrad(model, latents, labels, nb_batches)
+        return self.cost_subgrad(model, latents, labels)
 
     def fit(self, positives, negatives, initmodel, nbiter=4):
         """ Fits the model against positive and negative samples
@@ -214,10 +206,9 @@ class BinaryLLR:
             currentmodel = ssm(
                 currentmodel,
                 labelledsamples,
-                lambda nb,m,b: self.cost_stochastic_subgradient(
+                lambda m,b: self.cost_stochastic_subgradient(
                     poslatents,
                     negatives,
-                    nb,
                     m,
                     b
                 ),
