@@ -4,8 +4,24 @@
 import numpy as np
 import theano as th
 
+def cost_function(loss, C, samples, model):
+    innersum = 0
+
+    for sample in samples:
+        innersum += loss(model, sample)
+
+    return 0.5 * np.vdot(model,model) + C * innersum
+
+def subgradient_function(loss_subgrad, C, samples, model):
+    innersum = 0
+
+    for sample in samples:
+        innersum += loss_subgrad(model, sample)
+
+    return model + C * innersum
+
 def pegasos(loss_subgrad, samples, C, initmodel, nb_iter=None, 
-            loss=None, verbose=False):
+            loss=None, eps=10E-7, verbose=False):
     """ Minimizes a cost function expressed as a regularized sum of
         of a loss function using the Pegasos algorithm. The function
         minimized is:
@@ -40,22 +56,47 @@ def pegasos(loss_subgrad, samples, C, initmodel, nb_iter=None,
             loss function for a single sample, e.g. for logistic
             regression:
                 loss(model, (xi, yi)) = log(1 + exp(-yi * xi . model))
-            will NOT be called by algorithm, unless verbose is set to
-            True in which case it will be used to compute the full cost
-            function to be displayed on a regular basis.
+            will be called once in a while (every 10 times we go across
+            the dataset size).
     Returns:
         a new model vector which minimizes the cost function.
     """
     # Check parameters.
+    assert isinstance(C, float)
     assert C > 0
     if nb_iter == None:
-        assert C > 10E-5
-        nb_iter = int(round(C / 10E-5))
+        assert C > eps
+        nb_iter = int(round(C / eps))
     
     model = np.array(initmodel, copy=True)
+    # Keep track of best value found overall, as algorithm tends to
+    # overshoot.
+    bestcost = np.inf
+    bestmodel = None
 
     for t in range(1, nb_iter + 1):
-        sample = np.random.choice(samples)
+        # At each iteration, pick a random sample.
+        sample = samples[np.random.randint(len(samples))]
+        # Update the step size.
         step = C / t
-        subgrad = model + C 
+        # Compute the subgradient, and update the model accordingly.
+        subgrad = model + C * len(samples) * loss_subgrad(model, sample)
         model -= step * subgrad
+        if t % (10 * len(samples)) == 0:
+            # Print some information every time we iterate through
+            # 10 sample sizes.
+            fullcost = cost_function(loss, C, samples, model)
+            if fullcost < bestcost:
+                bestcost = fullcost
+                bestmodel = np.array(model, copy=True)
+            if verbose:
+                fullsubgrad = subgradient_function(loss_subgrad, C, samples, model)
+                print "Iteration " + repr(t)
+                print "Cost: " + repr(fullcost)
+                print "Subgradient norm: " + repr(np.linalg.norm(fullsubgrad))
+                print "Step: " + repr(step)
+    
+    if bestmodel == None:
+        return model
+    else:
+        return bestmodel

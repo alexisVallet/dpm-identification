@@ -10,6 +10,7 @@ import theano.tensor as T
 from theano.tensor.nnet import softplus
 
 from ssm import ssm
+from pegasos import pegasos
 
 class BinaryLLR:
     def __init__(self, latent_function, C, latent_args=None, 
@@ -53,14 +54,29 @@ class BinaryLLR:
         self.phi = T.matrix('phi')
         # y is the vector of class labels.
         self.y = T.vector('y', dtype='int32')
+        # Single element log loss and gradient.
+        self.latent = T.vector('phi_i')
+        self.label = T.scalar('yi', dtype='int32')
+        single_log_loss = T.log(1 + T.exp(-self.label*T.dot(self.latent, self.beta)))
+        self.log_loss_f = theano.function(
+            [self.beta, self.latent, self.label],
+            single_log_loss
+        )
+        log_loss_grad = T.grad(single_log_loss, self.beta)
+        self.log_loss_grad_f = theano.function(
+            [self.beta, self.latent, self.label],
+            log_loss_grad
+        )
         # Elementwise log loss, taking advantage of theano's softplus.
-        log_loss = softplus(T.dot(-T.diag(self.y), T.dot(self.phi, self.beta)))
+        self.log_loss = softplus(T.dot(-T.diag(self.y), T.dot(self.phi, self.beta)))
         # beta0 is the model beta with bias coefficient zeroed out.
         beta0 = T.set_subtensor(self.beta[0], 0)
         # Cost function. In this case, phi should contain all the latent 
         # vectors, and y all the corresponding labels.
+        regularization = 0.5 * T.dot(beta0, beta0)
+        innersum = self.C * T.sum(self.log_loss)
         self.cost_sym = (
-            0.5 * T.dot(beta0, beta0) + self.C * T.sum(log_loss)
+            regularization + innersum
         )
         self.cost = theano.function(
             [self.beta, self.phi, self.y], 
@@ -72,9 +88,12 @@ class BinaryLLR:
         # number of mini-batches. In this case, phi should hold only the 
         # latent vectors of the samples in the mini-batch, and y only the 
         # corresponding labels.
-        self.cost_subgrad_sym = T.grad(self.cost_sym, self.beta)
+        self.m = T.scalar('m', dtype='int32')
+        self.cost_subgrad_sym = (
+            T.grad(regularization, self.beta) + self.m * T.grad(innersum, self.beta)
+        )
         self.cost_subgrad = theano.function(
-            [self.beta, self.phi, self.y],
+            [self.beta, self.phi, self.y, self.m],
             self.cost_subgrad_sym
         )
         if verbose:
@@ -82,6 +101,54 @@ class BinaryLLR:
                 "Stochastic subgradient: " 
                 + theano.pp(self.cost_subgrad_sym)
             )
+
+    def loss_function(self, negatives, poslatents, model, sample):
+        """ Computes the loss function on a single sample.
+
+        Arguments:
+            negatives
+                list of negative samples.
+            poslatents
+                list of precomputed latent vectors for positive samples.
+            model
+                model to compute the loss against.
+            sample
+                (i, yi) tuple where i is the index of the sample in either
+                negatives or poslatents, and yi is the label (-1 for negative,
+                +1 for positive).
+        Returns:
+            the logarithmic loss of the sample's latent vector against the model.
+        """
+        idx, label = sample
+        latvec = None
+        if label > 0:
+            latvec = poslatents[idx]
+        else:
+            latvec = np.empty([model.size])
+            latvec[1:] = self.latent_function(
+                model[1:],
+                negatives[idx],
+                self.latent_args
+            )
+            latvec[0] = 1
+        
+        return self.log_loss_f(model, latvec, label)
+
+    def loss_subgrad(self, negatives, poslatents, model, sample):
+        idx, label = sample
+        latvec = None
+        if label > 0:
+            latvec = poslatents[idx]
+        else:
+            latvec = np.empty([model.size])
+            latvec[1:] = self.latent_function(
+                model[1:],
+                negatives[idx],
+                self.latent_args
+            )
+            latvec[0] = 1
+        
+        return self.log_loss_grad_f(model, latvec, label)
 
     def cost_function(self, negatives, poslatents, model):
         """ Computes the logistic cost function.
@@ -114,13 +181,15 @@ class BinaryLLR:
         return self.cost(model, latents, labels)
 
     def cost_stochastic_subgradient(self, poslatents, negatives,
-                                    model, labelledsamples):
+                                    nb_batches, model, labelledsamples):
         """ Compute a subgradient of the cost function 
             on randomly selected samples at a given point.
 
         Arguments:
             model    model vector corresponding to the point at
                      which we want to evaluate the cost subgradient.
+            nb_batches
+                     the number of batches.
             labelledsamples
                      array-like of (sampleidx, label) pairs where
                      sampleidx is the index of the sample in the positives
@@ -150,7 +219,7 @@ class BinaryLLR:
                 latents[i,0] = 1
                 labels[i] = -1
         
-        return self.cost_subgrad(model, latents, labels)
+        return self.cost_subgrad(model, latents, labels, 1)
 
     def fit(self, positives, negatives, initmodel, nbiter=4):
         """ Fits the model against positive and negative samples
@@ -203,21 +272,13 @@ class BinaryLLR:
                 zip(range(len(positives)), [1] * len(positives)) +
                 zip(range(len(negatives)), [-1] * len(negatives))
             )
-            currentmodel = ssm(
-                currentmodel,
+            currentmodel = pegasos(
+                lambda m, s: self.loss_subgrad(negatives, poslatents, m, s),
                 labelledsamples,
-                lambda m,b: self.cost_stochastic_subgradient(
-                    poslatents,
-                    negatives,
-                    m,
-                    b
-                ),
-                f=lambda m: self.cost_function(
-                    negatives,
-                    poslatents,
-                    m
-                ),
-                verbose=self.verbose
+                self.C,
+                currentmodel,
+                verbose=self.verbose,
+                loss=lambda m, s: self.loss_function(negatives, poslatents, m, s)
             )
 
         # Saves the results.

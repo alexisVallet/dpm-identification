@@ -5,6 +5,17 @@ import cv2
 import sys
 
 lib = ctypes.cdll.LoadLibrary("./c/gdt.so")
+cgdt1D = lib.gdt1D
+cgdt1D.restype = None
+cgdt1D.argtypes = [
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
+    ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
+    ctypes.c_int,
+    ndpointer(ctypes.c_float, flags=("C_CONTIGUOUS",'W')),
+    ndpointer(ctypes.c_int, flags=("C_CONTIGUOUS",'W')),
+    ctypes.c_int,
+    ctypes.c_double
+]
 cgdt2D = lib.gdt2D
 cgdt2D.restype = None
 cgdt2D.argtypes = [ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
@@ -14,6 +25,31 @@ cgdt2D.argtypes = [ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
                    ndpointer(ctypes.c_float, flags=("C_CONTIGUOUS",'W')),
                    ndpointer(ctypes.c_int, flags=("C_CONTIGUOUS",'W')),
                    ndpointer(ctypes.c_int, flags=("C_CONTIGUOUS",'W'))]
+
+def gdt2D_py(d, f, rg=None):
+    """ Python version for testing purposes.
+    """
+    rows, cols = f.shape
+    if rg==None:
+        rg = max(rows,cols)
+
+    float_f = f.astype(np.float32)
+    df = np.empty([rows, cols], dtype=np.float32)
+    arg1 = np.empty([rows, cols], dtype=np.int32)
+    arg2 = np.empty([rows, cols], dtype=np.int32)
+    dx = np.array([d[0], d[2]], dtype=np.float32)
+    dy = np.array([d[1], d[3]], dtype=np.float32)
+    # Compute 1D gdt on each line separately.
+    for i in range(rows):
+        cgdt1D(dx, float_f[i], cols, df[i], arg1, 0, rg)
+    # Then on each column.
+    dft = np.require(df.T, dtype=np.float32, requirements=['C_CONTIGUOUS'])
+    outdf = np.empty([cols, rows], dtype=np.float32)
+    for j in range(cols):
+        cgdt1D(dy, dft[j], rows, outdf[j], arg2, 0, rg)
+
+    return (outdf.T, arg2)
+    
 
 def gdt2D(d, f, rg=None):
     """ Computes the generalized distance transform of a function on a 2D

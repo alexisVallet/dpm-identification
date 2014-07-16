@@ -28,44 +28,26 @@ class WarpClassifier:
             positives    list of positive images to recognize.
             negatives    list of negative images.
         """
-        # Find out the average aspect ratio across
-        # positive samples. Use that value to define
-        # the feature map dimensions.
-        meanar = np.mean(map(lambda pos: float(pos.shape[1]) / pos.shape[0],
-                             positives))
-        # Basic algebra to get the corresponding number of rows/cols
-        # from the desired minimum dimension divisions.
-        self.nbrowfeat = None
-        self.nbcolfeat = None
-        
-        if meanar > 1:
-            self.nbrowfeat = self.mindimdiv
-            self.nbcolfeat = self.mindimdiv * meanar
-        else:
-            self.nbrowfeat = int(self.mindimdiv / meanar)
-            self.nbcolfeat = self.mindimdiv
-        
         # Warp all the training samples to flattened
         # feature maps.
+        posmaps, negmaps, self.nbrowfeat, self.nbcolfeat = feat.warped_fmaps(
+            positives, negatives, self.mindimdiv, self.feature
+        )
         nb_samples = len(positives) + len(negatives)
         nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
         X = np.empty([nb_samples, nb_features])
         y = np.empty([nb_samples])
-
         i = 0
-        for pos in positives:
-            featmap = feat.compute_featmap(pos, self.nbrowfeat, 
-                                           self.nbcolfeat, self.feature)
-            X[i,:] = featmap.flatten('C')
+
+        for pos in posmaps:
+            X[i,:] = pos.flatten('C')
             y[i] = 1
             i += 1
-        for neg in negatives:
-            featmap = feat.compute_featmap(neg, self.nbrowfeat, 
-                                           self.nbcolfeat, self.feature)
-            X[i,:] = featmap.flatten('C')
+        for neg in negmaps:
+            X[i,:] = neg.flatten('C')
             y[i] = 0
             i += 1
-        
+
         # Train a logistic regression on this data.
         self.logregr = LogisticRegression(C=self.C)
         self.logregr.fit(X, y)

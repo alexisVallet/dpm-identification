@@ -7,9 +7,9 @@ from matching import match_part
 from dpm import DPM, vectortodpm
 from warpclassifier import WarpClassifier
 from latent_lr import BinaryLLR
-from features import max_energy_subwindow, compute_regular_featmap
+from features import max_energy_subwindow, compute_featmap
 
-def _best_match(dpm, featmap):
+def _best_match(dpm, featmap, debug=False):
     """ Computes the best matching subwindows and corresponding
         displacements of a root less deformable parts model on a
         feature map.
@@ -33,7 +33,8 @@ def _best_match(dpm, featmap):
             featmap, 
             dpm.parts[i], 
             dpm.anchors[i],
-            dpm.deforms[i]
+            dpm.deforms[i],
+            debug
         ),
         range(len(dpm.parts))
     )
@@ -47,11 +48,13 @@ def _best_match_wrapper(modelvector, featmap, args):
         vector format.
     """
     modelsize = args['modelsize']
+    debug = args['debug']
 
     # Compute the best match on the converted model data structure.
     (subwins, displacements) = _best_match(
         vectortodpm(modelvector, modelsize),
-        featmap
+        featmap,
+        debug
     )
 
     # Put the computed latent values into a proper latent vector.
@@ -92,9 +95,6 @@ class BinaryDPMClassifier:
         self.nbparts = nbparts
         self.verbose = verbose
         self.debug = debug
-
-    def tofeatmap(self, image):
-        return compute_regular_featmap(image, self.feature, self.mindimdiv)
 
     def train(self, positives, negatives):
         """ Fits the classifier given a set of positive images and a set
@@ -145,6 +145,9 @@ class BinaryDPMClassifier:
             )
             cv2.waitKey(0)
         # Compute feature maps for all samples.
+        self.tofeatmap = lambda s: compute_featmap(
+            s, warp.nbrowfeat, warp.nbcolfeat, self.feature
+        )
         posmaps = map(self.tofeatmap, positives)
         negmaps = map(self.tofeatmap, negatives)
         # Train the DPM using binary LLR.
@@ -152,7 +155,7 @@ class BinaryDPMClassifier:
         self.llr = BinaryLLR(
             _best_match_wrapper,
             C=self.C, 
-            latent_args={'modelsize': modelsize},
+            latent_args={'modelsize': modelsize, 'debug': self.debug},
             verbose=self.verbose
         )
         self.llr.fit(posmaps, negmaps, initdpm.tovector())
