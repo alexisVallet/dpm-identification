@@ -4,9 +4,10 @@ from sklearn.linear_model import LogisticRegression
 import numpy as np
 
 import features as feat
+import lr
 
 class WarpClassifier:
-    def __init__(self, feature, mindimdiv, C=0.01):
+    def __init__(self, feature, mindimdiv, C=0.01, lrimpl='scikit'):
         """ Initialize the classifier.
         
         Arguments:
@@ -16,9 +17,11 @@ class WarpClassifier:
                        feature map computations.
             C          logistic regression soft-margin parameter.
         """
+        assert lrimpl in ['scikit', 'own']
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.C = C
+        self.lrimpl = lrimpl
 
     def train(self, positives, negatives):
         """ Trains the classifier given examples of a positive image to
