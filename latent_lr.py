@@ -10,7 +10,6 @@ import theano.tensor as T
 from theano.tensor.nnet import softplus
 
 from ssm import ssm
-from pegasos import pegasos
 
 class BinaryLLR:
     def __init__(self, latent_function, C, latent_args=None, 
@@ -221,7 +220,7 @@ class BinaryLLR:
         
         return self.cost_subgrad(model, latents, labels, 1)
 
-    def fit(self, positives, negatives, initmodel, nbiter=4):
+    def fit(self, positives, negatives, initmodel, nbiter=4, nb_opt_iter=50):
         """ Fits the model against positive and negative samples
             given an initial model to optimize. It should be noted
             that positives and negative samples may be any python
@@ -272,13 +271,25 @@ class BinaryLLR:
                 zip(range(len(positives)), [1] * len(positives)) +
                 zip(range(len(negatives)), [-1] * len(negatives))
             )
-            currentmodel = pegasos(
-                lambda m, s: self.loss_subgrad(negatives, poslatents, m, s),
-                labelledsamples,
-                self.C,
+            currentmodel = ssm(
                 currentmodel,
+                labelledsamples,
+                lambda nb,m,s: self.cost_stochastic_subgradient(
+                    poslatents,
+                    negatives,
+                    nb,
+                    m,
+                    s
+                ),
+                f=lambda m: self.cost_function(
+                    negatives,
+                    poslatents,
+                    m
+                ),
+                alpha_0=0.01,
+                learning_rate='constant',
                 verbose=self.verbose,
-                loss=lambda m, s: self.loss_function(negatives, poslatents, m, s)
+                nb_iter=nb_opt_iter
             )
 
         # Saves the results.
@@ -306,3 +317,36 @@ class BinaryLLR:
             ))
         
         return probas
+
+def _dummy_latent_function(model, sample, args):
+    return sample
+
+class BinaryLR:
+    """ Binary non-latent logistic regression implemented in terms of latent
+        LR. For testing purposes mostly.
+    """
+    def __init__(self, C, verbose=False):
+        self.llr = BinaryLLR(_dummy_latent_function, C, verbose=verbose)
+    
+    def fit(self, X, y):
+        nb_samples, nb_features = X.shape
+        positives = []
+        negatives = []
+
+        for i in range(nb_samples):
+            if y[i] > 0:
+                positives.append(X[i])
+            else:
+                negatives.append(X[i])
+        self.llr.fit(positives, negatives, np.zeros([nb_features]), 1,
+                     nb_opt_iter=100)
+        self.coef_ = self.llr.model[1:]
+    
+    def predict_proba(self, X):
+        nb_samples = X.shape[0]
+        samples = []
+
+        for i in range(nb_samples):
+            samples.append(X[i])
+        
+        return self.llr.predict_proba(samples)

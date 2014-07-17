@@ -4,7 +4,7 @@
 import numpy as np
 
 def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None, 
-        alpha_0=0.01, alpha_end=10E-5, verbose=False, learning_rate='optimal'):
+        alpha_0=0.1, alpha_end=10E-5, verbose=False, learning_rate='constant'):
     """ Minimizes a convex non-differentiable function on a set of samples
         using the stochastic subgradient method.
 
@@ -37,7 +37,7 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
     if nb_batches == None:
         nb_batches = max(1, len(samples) // 5)
     assert 1 <= nb_batches <= len(samples)
-    assert learning_rate in ['constant', 'optimal']
+    assert learning_rate in ['constant', 'optimal', 'pegasos']
     if learning_rate == 'optimal':
         assert alpha_end <= alpha_0
     
@@ -50,8 +50,8 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
         print "Initial cost: " + repr(f(model))
 
     for t in range(1, nb_iter):
-        if verbose:
-            print "Running epoch " + repr(t) + "..."
+        if learning_rate == 'pegasos':
+            alpha = alpha_0 / t
         # Shuffle the dataset.
         shuffledidxs = np.random.permutation(len(samples))
         # Split the dataset into nb_batches roughly equally sized batches.
@@ -74,7 +74,7 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
         if learning_rate == 'optimal':
             # Update the learning rate.
             alpha = alpha / denom
-        if verbose:
+        if verbose and t % 10 == 0:
             print (
                 "Average subgradient norm: " 
                 + repr(avgsubgradnorm / nb_batches)
