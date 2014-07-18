@@ -241,6 +241,11 @@ class BinaryLLR:
         # bias
         currentmodel[0] = 0
         currentmodel[1:nb_features+1] = initmodel
+        # Keep track of the best model encountered.
+        # As the "coordinate descent" approach is mostly heuristic,
+        # it is not guaranteed to converge to the minimum.
+        bestmodel = None
+        bestcost = np.inf
 
         # Iteratively optimize the cost function using the coordinate
         # descent approach.
@@ -291,9 +296,18 @@ class BinaryLLR:
                 verbose=self.verbose,
                 nb_iter=nb_opt_iter
             )
+            # Keep track of the best encountered model.
+            currentcost = self.cost_function(
+                negatives,
+                poslatents,
+                currentmodel
+            )
+            if currentcost < bestcost:
+                bestmodel = np.array(currentmodel, copy=True)
+                bestcost = currentcost
 
         # Saves the results.
-        self.model = currentmodel
+        self.model = bestmodel
 
     def predict_proba(self, samples):
         """ Returns probabilities of each sample being a positive sample.

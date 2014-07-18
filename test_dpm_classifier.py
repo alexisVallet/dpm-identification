@@ -37,7 +37,7 @@ class TestDPMClassifier(unittest.TestCase):
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
         C = 0.1
-        nbparts = 1
+        nbparts = 2
         classifier = BinaryDPMClassifier(
             C,
             feature,
