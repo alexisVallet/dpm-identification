@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, roc_auc_score
 
 from dpm_classifier import BinaryDPMClassifier
+from calibration import LogisticCalibrator
 from ioutils import load_data
 from features import Feature
 
@@ -37,14 +38,16 @@ class TestDPMClassifier(unittest.TestCase):
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
         C = 0.1
-        nbparts = 2
-        classifier = BinaryDPMClassifier(
-            C,
-            feature,
-            mindimdiv,
-            nbparts,
-            verbose=True,
-            debug=False
+        nbparts = 1
+        classifier = LogisticCalibrator(
+            BinaryDPMClassifier(
+                C,
+                feature,
+                mindimdiv,
+                nbparts,
+                verbose=True,
+                debug=False
+            )
         )
         label = 'rei_ayanami'
         positives = self.traindata[label]
