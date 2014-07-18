@@ -100,6 +100,12 @@ class BinaryLLR:
                 "Stochastic subgradient: " 
                 + theano.pp(self.cost_subgrad_sym)
             )
+        # hypothesis function computing the probability of n test samples
+        # whose latent vectors are stored in phi.
+        self.hypothesis = theano.function(
+            [self.beta, self.phi],
+            T.nnet.sigmoid(T.dot(self.phi, self.beta))
+        )
 
     def loss_function(self, negatives, poslatents, model, sample):
         """ Computes the loss function on a single sample.
@@ -220,7 +226,7 @@ class BinaryLLR:
         
         return self.cost_subgrad(model, latents, labels, 1)
 
-    def fit(self, positives, negatives, initmodel, nbiter=4, nb_opt_iter=50):
+    def fit(self, positives, negatives, initmodel, nbiter=2, nb_opt_iter=100):
         """ Fits the model against positive and negative samples
             given an initial model to optimize. It should be noted
             that positives and negative samples may be any python
@@ -307,6 +313,9 @@ class BinaryLLR:
                 bestcost = currentcost
 
         # Saves the results.
+        if self.verbose:
+            print "Best model encountered:"
+            print "Cost: " + repr(bestcost)
         self.model = bestmodel
 
     def predict_proba(self, samples):
@@ -319,18 +328,22 @@ class BinaryLLR:
         Returns:
            nb_sample numpy vector of probabilities.
         """
-        nb_sample = len(samples)
-        probas = np.empty([nb_sample])
-
+        # Compute latent vectors for all samples.
+        nb_samples = len(samples)
+        nb_featuresp1 = self.model.size
+        phi = np.empty([nb_samples, nb_featuresp1])
+        # Set the biases.
+        phi[:,0] = 1
+        # Compute the latent vectors.
         biaslessmodel = self.model[1:]
-        for i in range(nb_sample):
-            latvec = self.latent_function(biaslessmodel, samples[i], self.latent_args)
-            probas[i] = 1.0 / (1 + np.exp(
-                -np.vdot(biaslessmodel, latvec)
-                -self.model[0] # bias
-            ))
-        
-        return probas
+        for i in range(nb_samples):
+            phi[i,1:] = self.latent_function(
+                biaslessmodel,
+                samples[i],
+                self.latent_args
+            )
+        # Compute all the probabilities in one go.
+        return self.hypothesis(self.model, phi)
 
 def _dummy_latent_function(model, sample, args):
     return sample

@@ -47,9 +47,10 @@ class TestDPMClassifier(unittest.TestCase):
                 nbparts,
                 verbose=True,
                 debug=False
-            )
+            ),
+            verbose=True
         )
-        label = 'rei_ayanami'
+        label = 'asuka_langley'
         positives = self.traindata[label]
         negatives = reduce(lambda l1,l2:l1+l2,
                            [self.traindata[l] for l in self.traindata
@@ -57,8 +58,8 @@ class TestDPMClassifier(unittest.TestCase):
         print "training..."
         classifier.train(positives, negatives)
         # Display the learned DPM
-        print "Deformations: " + repr(classifier.dpm.deforms)
-        image = classifier.dpm.partsimage(feature.visualize)
+        print "Deformations: " + repr(classifier.classifier.dpm.deforms)
+        image = classifier.classifier.dpm.partsimage(feature.visualize)
         winname = 'learned dpm'
         cv2.namedWindow(winname, cv2.WINDOW_NORMAL)
         cv2.imshow(winname, image)
@@ -83,16 +84,6 @@ class TestDPMClassifier(unittest.TestCase):
         print repr(threshs)
         plt.plot(fpr, tpr)
         plt.show()
-
-        # show which parts are picked up in each test image, from highest
-        # to lowest probability
-        idxs = np.argsort(probas)[::-1]
-        
-        for i in idxs:
-            print "probability: " + repr(probas[i])
-            image = np.array(testsamples[i])
-            cv2.imshow("image", image)
-            cv2.waitKey(0)
 
 if __name__ == "__main__":
     unittest.main()
