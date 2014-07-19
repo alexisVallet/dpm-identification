@@ -45,10 +45,10 @@ class TestDPMClassifier(unittest.TestCase):
                 feature,
                 mindimdiv,
                 nbparts,
-                verbose=True,
+                verbose=False,
                 debug=False
             ),
-            verbose=True
+            verbose=False
         )
         label = 'asuka_langley'
         positives = self.traindata[label]

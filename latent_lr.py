@@ -11,6 +11,56 @@ from theano.tensor.nnet import softplus
 
 from ssm import ssm
 
+def _compile_funcs():
+    # Symbolic theano expressions for the cost function and its 
+    # subgradient with fixed latent vectors. The latent vectors 
+    # themselves will be of recomputed in the case of negative samples 
+    # as a preprocessing step.
+    # Beta is the model vector.
+    beta = T.vector('beta')
+    # Phi is the matrix of precomputed latent vectors for beta as rows.
+    phi = T.matrix('phi')
+    # y is the vector of class labels.
+    y = T.vector('y', dtype='int32')
+    # Elementwise log loss, taking advantage of theano's softplus.
+    log_loss = softplus(T.dot(-T.diag(y), T.dot(phi, beta)))
+    # beta0 is the model beta with bias coefficient zeroed out.
+    beta0 = T.set_subtensor(beta[0], 0)
+    # Cost function. In this case, phi should contain all the latent 
+    # vectors, and y all the corresponding labels.
+    regularization = 0.5 * T.dot(beta0, beta0)
+    # C is the regularization parameter.
+    C = T.scalar('C')
+    innersum = C * T.sum(log_loss)
+    cost_sym = (
+        regularization + innersum
+    )
+    cost = theano.function(
+        [C, beta, phi, y], 
+        cost_sym
+    )
+    # Stochastic subgradient of the cost function. m will be the 
+    # number of mini-batches. In this case, phi should hold only the 
+    # latent vectors of the samples in the mini-batch, and y only the 
+    # corresponding labels.
+    m = T.scalar('m', dtype='int32')
+    cost_subgrad_sym = (
+        T.grad(regularization, beta) + m * T.grad(innersum, beta)
+    )
+    cost_subgrad = theano.function(
+        [C, beta, phi, y, m],
+        cost_subgrad_sym
+    )
+    # hypothesis function computing the probability of n test samples
+    # whose latent vectors are stored in phi.
+    hypothesis = theano.function(
+        [beta, phi],
+        T.nnet.sigmoid(T.dot(phi, beta))
+    )
+    return (cost, cost_subgrad, hypothesis)
+
+log_cost, log_cost_subgrad, log_hypothesis = _compile_funcs()
+
 class BinaryLLR:
     def __init__(self, latent_function, C, latent_args=None, 
                  verbose=False):
@@ -43,117 +93,26 @@ class BinaryLLR:
         self.latent_args = latent_args
         self.C = C
         self.verbose = verbose
-        # Symbolic theano expressions for the cost function and its 
-        # subgradient with fixed latent vectors. The latent vectors 
-        # themselves will be of recomputed in the case of negative samples 
-        # as a preprocessing step.
-        # Beta is the model vector.
-        self.beta = T.vector('beta')
-        # Phi is the matrix of precomputed latent vectors for beta as rows.
-        self.phi = T.matrix('phi')
-        # y is the vector of class labels.
-        self.y = T.vector('y', dtype='int32')
-        # Single element log loss and gradient.
-        self.latent = T.vector('phi_i')
-        self.label = T.scalar('yi', dtype='int32')
-        single_log_loss = T.log(1 + T.exp(-self.label*T.dot(self.latent, self.beta)))
-        self.log_loss_f = theano.function(
-            [self.beta, self.latent, self.label],
-            single_log_loss
-        )
-        log_loss_grad = T.grad(single_log_loss, self.beta)
-        self.log_loss_grad_f = theano.function(
-            [self.beta, self.latent, self.label],
-            log_loss_grad
-        )
-        # Elementwise log loss, taking advantage of theano's softplus.
-        self.log_loss = softplus(T.dot(-T.diag(self.y), T.dot(self.phi, self.beta)))
-        # beta0 is the model beta with bias coefficient zeroed out.
-        beta0 = T.set_subtensor(self.beta[0], 0)
-        # Cost function. In this case, phi should contain all the latent 
-        # vectors, and y all the corresponding labels.
-        regularization = 0.5 * T.dot(beta0, beta0)
-        innersum = self.C * T.sum(self.log_loss)
-        self.cost_sym = (
-            regularization + innersum
-        )
-        self.cost = theano.function(
-            [self.beta, self.phi, self.y], 
-            self.cost_sym
-        )
-        if verbose:
-            print "Cost function: " + theano.pp(self.cost_sym)
-        # Stochastic subgradient of the cost function. m will be the 
-        # number of mini-batches. In this case, phi should hold only the 
-        # latent vectors of the samples in the mini-batch, and y only the 
-        # corresponding labels.
-        self.m = T.scalar('m', dtype='int32')
-        self.cost_subgrad_sym = (
-            T.grad(regularization, self.beta) + self.m * T.grad(innersum, self.beta)
-        )
-        self.cost_subgrad = theano.function(
-            [self.beta, self.phi, self.y, self.m],
-            self.cost_subgrad_sym
-        )
-        if verbose:
-            print (
-                "Stochastic subgradient: " 
-                + theano.pp(self.cost_subgrad_sym)
-            )
-        # hypothesis function computing the probability of n test samples
-        # whose latent vectors are stored in phi.
-        self.hypothesis = theano.function(
-            [self.beta, self.phi],
-            T.nnet.sigmoid(T.dot(self.phi, self.beta))
-        )
+        self.model = None
 
-    def loss_function(self, negatives, poslatents, model, sample):
-        """ Computes the loss function on a single sample.
-
-        Arguments:
-            negatives
-                list of negative samples.
-            poslatents
-                list of precomputed latent vectors for positive samples.
-            model
-                model to compute the loss against.
-            sample
-                (i, yi) tuple where i is the index of the sample in either
-                negatives or poslatents, and yi is the label (-1 for negative,
-                +1 for positive).
-        Returns:
-            the logarithmic loss of the sample's latent vector against the model.
+    def __getstate__(self):
+        """ Pickling state. Only pickle the essential stuff: the latent
+            function, its arguments, C, the model (if trained).
         """
-        idx, label = sample
-        latvec = None
-        if label > 0:
-            latvec = poslatents[idx]
-        else:
-            latvec = np.empty([model.size])
-            latvec[1:] = self.latent_function(
-                model[1:],
-                negatives[idx],
-                self.latent_args
-            )
-            latvec[0] = 1
-        
-        return self.log_loss_f(model, latvec, label)
+        return {
+            'lfunc': self.latent_function,
+            'largs': self.latent_args,
+            'C': self.C,
+            'model': self.model
+        }
 
-    def loss_subgrad(self, negatives, poslatents, model, sample):
-        idx, label = sample
-        latvec = None
-        if label > 0:
-            latvec = poslatents[idx]
-        else:
-            latvec = np.empty([model.size])
-            latvec[1:] = self.latent_function(
-                model[1:],
-                negatives[idx],
-                self.latent_args
-            )
-            latvec[0] = 1
-        
-        return self.log_loss_grad_f(model, latvec, label)
+    def __setstate__(self, state):
+        """ Unpickling state.
+        """
+        self.latent_function = state['lfunc']
+        self.latent_args = state['largs']
+        self.C = state['C']
+        self.model = state['model']
 
     def cost_function(self, negatives, poslatents, model):
         """ Computes the logistic cost function.
@@ -183,7 +142,7 @@ class BinaryLLR:
         labels[0:nb_pos] = 1
         labels[nb_pos:] = -1
 
-        return self.cost(model, latents, labels)
+        return log_cost(self.C, model, latents, labels)
 
     def cost_stochastic_subgradient(self, poslatents, negatives,
                                     nb_batches, model, labelledsamples):
@@ -224,7 +183,7 @@ class BinaryLLR:
                 latents[i,0] = 1
                 labels[i] = -1
         
-        return self.cost_subgrad(model, latents, labels, 1)
+        return log_cost_subgrad(self.C, model, latents, labels, 1)
 
     def fit(self, positives, negatives, initmodel, nbiter=2, nb_opt_iter=100):
         """ Fits the model against positive and negative samples
@@ -343,7 +302,7 @@ class BinaryLLR:
                 self.latent_args
             )
         # Compute all the probabilities in one go.
-        return self.hypothesis(self.model, phi)
+        return log_hypothesis(self.model, phi)
 
 def _dummy_latent_function(model, sample, args):
     return sample

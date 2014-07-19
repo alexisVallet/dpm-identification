@@ -6,7 +6,8 @@ import cv2
 
 from ioutils import load_data
 from onevsall import OneVSAll
-from partclassifier import BinaryPartClassifier
+from dpm_classifier import BinaryDPMClassifier
+from calibration import LogisticCalibrator
 from features import Feature
 
 class TestOneVSAll(unittest.TestCase):
@@ -45,21 +46,48 @@ class TestOneVSAll(unittest.TestCase):
         
         # Run training.
         nbbins = (4,4,4)
-        initclassifier = lambda: BinaryPartClassifier(
-            0.1,
-            Feature('bgrhist', np.prod(nbbins), nbbins),
-            10,
-            verbose=False,
-            debug=False,
-            algorithm='l-bfgs'
+        feature = Feature('bgrhist', np.prod(nbbins), nbbins)
+        mindimdiv = 10
+        C = 0.1
+        nbparts = 1
+        initclassifier = lambda: LogisticCalibrator(
+            BinaryDPMClassifier(
+                C,
+                feature,
+                mindimdiv,
+                nbparts,
+                verbose=False,
+                debug=False
+            ),
+            verbose=False
         )
         cachedir = 'data/dpmid-cache/test_onevall'
         onevall = OneVSAll(
             initclassifier,
-            cachedir='data/dpmid-cache/',
+            cachedir=cachedir,
+            nb_cores=1,
             verbose=True
         )
         onevall.train(trainsamples, trainlabels)
+
+        testsamples = []
+        expected = []
+
+        for k in self.testdata:
+            for s in self.testdata[k]:
+                testsamples.append(s)
+                expected.append(k)
+
+        predicted = onevall.predict_labels(testsamples)
+        print expected
+        print predicted
+        correct = 0
+        
+        for i in range(len(predicted)):
+            if predicted[i] == expected[i]:
+                correct += 1
+
+        print "Recognition rate: " + repr(float(correct) / len(predicted))
 
 if __name__ == "__main__":
     unittest.main()

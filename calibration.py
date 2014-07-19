@@ -5,6 +5,18 @@ import theano
 import theano.tensor as T
 from sklearn.linear_model import LogisticRegression
 
+def _compile_funcs():
+    a = T.scalar('a')
+    b = T.scalar('b')
+    p = T.vector('p')
+
+    return theano.function(
+        [a, b, p],
+        T.nnet.sigmoid(10 * (p - a) / (b - a) - 5)
+    )
+
+log_calibrate = _compile_funcs()
+
 class LogisticCalibrator:
     """ Calibrates score by training a logistic function on the output
         probabilities of the training set. The calibration simply maps
@@ -21,24 +33,22 @@ class LogisticCalibrator:
         self.classifier.train(positives, negatives)
         # Computes predicted probabilities on the training set.
         probas = self.classifier.predict_proba(positives + negatives)
-        minprob = probas.min()
-        maxprob = probas.max()
+        self.minprob = probas.min()
+        self.maxprob = probas.max()
 
         if self.verbose:
             print "Training:"
             print "Uncalibrated: "
-            print "min: " + repr(minprob)
-            print "max: " + repr(maxprob)
+            print "min: " + repr(self.minprob)
+            print "max: " + repr(self.maxprob)
             print "avg: " + repr(probas.mean())
-
-        p = T.vector('p')
-        # Compile the theano function for calibration.
-        self.calibrate = theano.function(
-            [p],
-            T.nnet.sigmoid(10 * (p - minprob) / (maxprob - minprob) - 5)
-        )
+        
         if self.verbose:
-            calibrated = self.calibrate(probas)
+            calibrated = log_calibrate(
+                self.minprob, 
+                self.maxprob, 
+                probas
+            )
             print "Calibrated:"
             print "min: " + repr(calibrated.min())
             print "max: " + repr(calibrated.max())
@@ -54,7 +64,11 @@ class LogisticCalibrator:
             print "max: " + repr(probas.max())
             print "avg: " + repr(probas.mean())
         # Calibrate them using a sigmoid function.
-        calibrated = self.calibrate(probas)
+        calibrated = log_calibrate(
+            self.minprob, 
+            self.maxprob, 
+            probas
+        )
         if self.verbose:
             print "Calibrated: "
             print "min: " + repr(calibrated.min())

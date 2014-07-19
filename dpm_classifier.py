@@ -96,6 +96,11 @@ class BinaryDPMClassifier:
         self.verbose = verbose
         self.debug = debug
 
+    def tofeatmap(self, image):
+        return compute_featmap(
+            image, self.nbrowfeat, self.nbcolfeat, self.feature
+        )
+
     def train(self, positives, negatives):
         """ Fits the classifier given a set of positive images and a set
             of negative images.
@@ -145,9 +150,8 @@ class BinaryDPMClassifier:
             )
             cv2.waitKey(0)
         # Compute feature maps for all samples.
-        self.tofeatmap = lambda s: compute_featmap(
-            s, warp.nbrowfeat, warp.nbcolfeat, self.feature
-        )
+        self.nbrowfeat = warp.nbrowfeat
+        self.nbcolfeat = warp.nbcolfeat
         posmaps = map(self.tofeatmap, positives)
         negmaps = map(self.tofeatmap, negatives)
         # Train the DPM using binary LLR.
