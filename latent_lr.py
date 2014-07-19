@@ -185,7 +185,8 @@ class BinaryLLR:
         
         return log_cost_subgrad(self.C, model, latents, labels, 1)
 
-    def fit(self, positives, negatives, initmodel, nbiter=2, nb_opt_iter=100):
+    def fit(self, positives, negatives, initmodel, nbiter=2, 
+            nb_opt_iter=100, learning_rate=0.01):
         """ Fits the model against positive and negative samples
             given an initial model to optimize. It should be noted
             that positives and negative samples may be any python
@@ -256,7 +257,7 @@ class BinaryLLR:
                     poslatents,
                     m
                 ),
-                alpha_0=0.01,
+                alpha_0=learning_rate,
                 learning_rate='constant',
                 verbose=self.verbose,
                 nb_iter=nb_opt_iter
@@ -324,8 +325,8 @@ class BinaryLR:
                 positives.append(X[i])
             else:
                 negatives.append(X[i])
-        self.llr.fit(positives, negatives, np.zeros([nb_features]), 1,
-                     nb_opt_iter=100)
+        self.llr.fit(positives, negatives, np.zeros([nb_features]), 
+                     nbiter=1, nb_opt_iter=100, learning_rate=0.01)
         self.coef_ = self.llr.model[1:]
     
     def predict_proba(self, X):

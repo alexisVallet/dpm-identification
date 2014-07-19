@@ -9,6 +9,7 @@ from onevsall import OneVSAll
 from dpm_classifier import BinaryDPMClassifier
 from calibration import LogisticCalibrator
 from features import Feature
+from warpclassifier import WarpClassifier
 
 class TestOneVSAll(unittest.TestCase):
     @classmethod
@@ -51,17 +52,15 @@ class TestOneVSAll(unittest.TestCase):
         C = 0.1
         nbparts = 1
         initclassifier = lambda: LogisticCalibrator(
-            BinaryDPMClassifier(
-                C,
+            WarpClassifier(
                 feature,
                 mindimdiv,
-                nbparts,
-                verbose=False,
-                debug=False
+                C,
+                verbose=True
             ),
-            verbose=False
+            verbose=True
         )
-        cachedir = 'data/dpmid-cache/test_onevall'
+        cachedir = 'data/dpmid-cache/onevall_warp'
         onevall = OneVSAll(
             initclassifier,
             cachedir=cachedir,
