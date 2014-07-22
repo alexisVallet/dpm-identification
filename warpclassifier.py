@@ -7,7 +7,8 @@ import features as feat
 from latent_lr import BinaryLR
 
 class WarpClassifier:
-    def __init__(self, feature, mindimdiv, C=0.01, lrimpl='llr', verbose=False):
+    def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01,
+                 verbose=False, lrimpl='sklearn'):
         """ Initialize the classifier.
         
         Arguments:
@@ -17,12 +18,12 @@ class WarpClassifier:
                        feature map computations.
             C          logistic regression soft-margin parameter.
         """
-        assert lrimpl in ['scikit-lr', 'scikit-sgd', 'llr']
+        assert lrimpl in ['llr', 'sklearn']
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.C = C
-        self.lrimpl = lrimpl
         self.verbose = verbose
+        self.lrimpl = lrimpl
 
     def train(self, positives, negatives):
         """ Trains the classifier given examples of a positive image to
@@ -51,17 +52,13 @@ class WarpClassifier:
             X[i,:] = neg.flatten('C')
             y[i] = 0
             i += 1
-
-        # Train a logistic regression on this data, with the user specified
-        # implementation.
-        if self.lrimpl == 'scikit-lr':
-            self.logregr = LogisticRegression(C=self.C)
-        if self.lrimpl == 'scikit-sgd':
-            self.logregr = SGDClassifier(loss='log', verbose=1 if self.verbose else 0,
-                                         alpha=1./self.C, n_iter=1000)
-        elif self.lrimpl == 'llr':
+        
+        if self.lrimpl == 'llr':
             self.logregr = BinaryLR(self.C, verbose=self.verbose)
-        self.logregr.fit(X, y)
+            self.logregr.fit(X, y, nb_iter=100, learning_rate=self.learning_rate)
+        elif self.lrimpl == 'sklearn':
+            self.logregr = LogisticRegression(C=self.C)
+            self.logregr.fit(X, y)
         # Save the (well shaped) feature map infered by logistic regression.
         self.model_featmap = self.logregr.coef_.reshape(
             (self.nbrowfeat, self.nbcolfeat, self.feature.dimension)
@@ -90,8 +87,7 @@ class WarpClassifier:
                                            self.nbcolfeat, self.feature)
             X[i,:] = featmap.flatten('C')
         # Run logistic regression probability estimates.
-        if self.lrimpl in ['scikit-lr', 'scikit-sgd']:
-            return self.logregr.predict_proba(X)[:,1]
-        elif self.lrimpl in ['llr']:
+        if self.lrimpl == 'llr':
             return self.logregr.predict_proba(X)
-
+        elif self.lrimpl == 'sklearn':
+            return self.logregr.predict_proba(X)[:,1]

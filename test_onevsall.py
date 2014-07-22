@@ -3,6 +3,10 @@
 import unittest
 import numpy as np
 import cv2
+import os 
+import errno
+from sklearn.metrics import roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
 
 from ioutils import load_data
 from onevsall import OneVSAll
@@ -51,16 +55,16 @@ class TestOneVSAll(unittest.TestCase):
         mindimdiv = 10
         C = 0.1
         nbparts = 1
-        initclassifier = lambda: LogisticCalibrator(
-            WarpClassifier(
+        initclassifier = lambda: WarpClassifier(
                 feature,
                 mindimdiv,
                 C,
-                verbose=True
-            ),
-            verbose=True
+                verbose=True,
+                lrimpl='sklearn'
         )
-        cachedir = 'data/dpmid-cache/onevall_warp'
+        cachedir = 'data/dpmid-cache/onevall_warp_uncalibrated_skl'
+        if not os.path.isdir(cachedir):
+            os.makedirs(cachedir)
         onevall = OneVSAll(
             initclassifier,
             cachedir=cachedir,
@@ -87,6 +91,18 @@ class TestOneVSAll(unittest.TestCase):
                 correct += 1
 
         print "Recognition rate: " + repr(float(correct) / len(predicted))
+
+        # Display ROC curves for each individual classifier.
+        for i in range(len(onevall.labels_set)):
+            label = onevall.labels_set[i]
+            classifier = onevall.binmodels[i]
+            expprobas = [1 if k == label else 0 for k in expected]
+            actualprobas = classifier.predict_proba(testsamples)
+            fpr, tpr, threshs = roc_curve(expprobas, actualprobas)
+            auc = roc_auc_score(expprobas, actualprobas)
+            print "AUC for " + repr(label) + ": " + repr(auc)
+            plt.plot(fpr, tpr)
+            plt.show()
 
 if __name__ == "__main__":
     unittest.main()

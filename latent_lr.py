@@ -315,7 +315,7 @@ class BinaryLR:
     def __init__(self, C, verbose=False):
         self.llr = BinaryLLR(_dummy_latent_function, C, verbose=verbose)
     
-    def fit(self, X, y):
+    def fit(self, X, y, nb_iter=100, learning_rate=0.01):
         nb_samples, nb_features = X.shape
         positives = []
         negatives = []
@@ -326,7 +326,8 @@ class BinaryLR:
             else:
                 negatives.append(X[i])
         self.llr.fit(positives, negatives, np.zeros([nb_features]), 
-                     nbiter=1, nb_opt_iter=100, learning_rate=0.01)
+                     nbiter=1, nb_opt_iter=nb_iter, 
+                     learning_rate=learning_rate)
         self.coef_ = self.llr.model[1:]
     
     def predict_proba(self, X):
