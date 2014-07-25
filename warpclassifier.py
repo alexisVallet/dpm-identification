@@ -5,10 +5,11 @@ import numpy as np
 
 import features as feat
 from latent_lr import BinaryLR
+import lr
 
 class WarpClassifier:
-    def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01,
-                 verbose=False, lrimpl='sklearn'):
+    def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01, 
+                 nbiter=1000, batch_size=5, verbose=False, lrimpl='sklearn'):
         """ Initialize the classifier.
         
         Arguments:
@@ -18,12 +19,15 @@ class WarpClassifier:
                        feature map computations.
             C          logistic regression soft-margin parameter.
         """
-        assert lrimpl in ['llr', 'sklearn']
+        assert lrimpl in ['llr', 'sklearn', 'theano']
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.C = C
         self.verbose = verbose
         self.lrimpl = lrimpl
+        self.learning_rate=learning_rate
+        self.nbiter = nbiter
+        self.batch_size = batch_size
 
     def train(self, positives, negatives):
         """ Trains the classifier given examples of a positive image to
@@ -50,14 +54,24 @@ class WarpClassifier:
             i += 1
         for neg in negmaps:
             X[i,:] = neg.flatten('C')
-            y[i] = 0
+            y[i] = -1
             i += 1
         
         if self.lrimpl == 'llr':
             self.logregr = BinaryLR(self.C, verbose=self.verbose)
-            self.logregr.fit(X, y, nb_iter=100, learning_rate=self.learning_rate)
+            self.logregr.fit(X, y, nb_iter=self.nbiter, learning_rate=self.learning_rate)
+        elif self.lrimpl == 'theano':
+            self.logregr = lr.LogisticRegression(
+                self.C, 
+                verbose=self.verbose)
+            self.logregr.fit(X, y, nb_iter=self.nbiter, learning_rate=self.learning_rate, batch_size=self.batch_size)
         elif self.lrimpl == 'sklearn':
-            self.logregr = LogisticRegression(C=self.C)
+            self.logregr = LogisticRegression(
+                penalty='l2',
+                C=self.C,
+                fit_intercept=True,
+                dual=False
+            )
             self.logregr.fit(X, y)
         # Save the (well shaped) feature map infered by logistic regression.
         self.model_featmap = self.logregr.coef_.reshape(
@@ -87,7 +101,7 @@ class WarpClassifier:
                                            self.nbcolfeat, self.feature)
             X[i,:] = featmap.flatten('C')
         # Run logistic regression probability estimates.
-        if self.lrimpl == 'llr':
+        if self.lrimpl in ['llr', 'theano']:
             return self.logregr.predict_proba(X)
         elif self.lrimpl == 'sklearn':
             return self.logregr.predict_proba(X)[:,1]

@@ -56,13 +56,16 @@ class TestOneVSAll(unittest.TestCase):
         C = 0.1
         nbparts = 1
         initclassifier = lambda: WarpClassifier(
-                feature,
-                mindimdiv,
-                C,
-                verbose=True,
-                lrimpl='sklearn'
+            feature,
+            mindimdiv,
+            C,
+            verbose=True,
+            lrimpl='theano',
+            learning_rate=0.01,
+            nbiter=100,
+            batch_size=800
         )
-        cachedir = 'data/dpmid-cache/onevall_warp_uncalibrated_skl'
+        cachedir = 'data/dpmid-cache/onevall_warp_theano'
         if not os.path.isdir(cachedir):
             os.makedirs(cachedir)
         onevall = OneVSAll(
@@ -100,6 +103,17 @@ class TestOneVSAll(unittest.TestCase):
             actualprobas = classifier.predict_proba(testsamples)
             fpr, tpr, threshs = roc_curve(expprobas, actualprobas)
             auc = roc_auc_score(expprobas, actualprobas)
+            print "model (excluding bias) stats:"
+            print "l2 norm: " + repr(np.linalg.norm(classifier.logregr.coef_))
+            print "l1 norm: " + repr(np.linalg.norm(classifier.logregr.coef_,
+                                                    ord=1))
+            print "min: " + repr(classifier.logregr.coef_.min())
+            print "max: " + repr(classifier.logregr.coef_.max())
+            print "mean: " + repr(classifier.logregr.coef_.mean())
+            print "bias: " + repr(classifier.logregr.intercept_) 
+            print "min proba: " + repr(actualprobas.min())
+            print "max proba: " + repr(actualprobas.max())
+            print "mean proba: " + repr(actualprobas.mean())
             print "AUC for " + repr(label) + ": " + repr(auc)
             plt.plot(fpr, tpr)
             plt.show()

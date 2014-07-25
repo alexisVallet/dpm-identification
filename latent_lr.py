@@ -16,40 +16,38 @@ def _compile_funcs():
     # subgradient with fixed latent vectors. The latent vectors 
     # themselves will be of recomputed in the case of negative samples 
     # as a preprocessing step.
-    # Beta is the model vector.
+    # Beta is the model vector, with bias excluded.
     beta = T.vector('beta')
-    # Phi is the matrix of precomputed latent vectors for beta as rows.
+    bias = T.scalar('b')
+    # Phi is the matrix of precomputed latent vectors for beta as rows,
+    # with bias coefficient excluded.
     phi = T.matrix('phi')
+    phibias = T.ones([phi.shape[0], 1])
     # y is the vector of class labels.
     y = T.vector('y', dtype='int32')
+    fullphi = T.concatenate([phibias, phi], axis=1)
+    fullmodel = T.set_subtensor(T.alloc(bias, beta.size+1)[1:], beta)
     # Elementwise log loss, taking advantage of theano's softplus.
-    log_loss = softplus(T.dot(-T.diag(y), T.dot(phi, beta)))
-    # beta0 is the model beta with bias coefficient zeroed out.
-    beta0 = T.set_subtensor(beta[0], 0)
+    log_loss = softplus(T.dot(-T.diag(y), T.dot(fullphi, fullmodel)))
     # Cost function. In this case, phi should contain all the latent 
     # vectors, and y all the corresponding labels.
-    regularization = 0.5 * T.dot(beta0, beta0)
     # C is the regularization parameter.
     C = T.scalar('C')
-    innersum = C * T.sum(log_loss)
-    cost_sym = (
-        regularization + innersum
-    )
+    cost_sym = 0.5 * T.dot(beta, beta) + C * T.sum(log_loss)
     cost = theano.function(
-        [C, beta, phi, y], 
+        [C, bias, beta, phi, y], 
         cost_sym
     )
-    # Stochastic subgradient of the cost function. m will be the 
-    # number of mini-batches. In this case, phi should hold only the 
-    # latent vectors of the samples in the mini-batch, and y only the 
-    # corresponding labels.
-    m = T.scalar('m', dtype='int32')
-    cost_subgrad_sym = (
-        T.grad(regularization, beta) + m * T.grad(innersum, beta)
+    # Stochastic subgradient of the cost function. In this case, phi 
+    # should hold only the latent vectors of the samples in the 
+    # mini-batch, and y only the corresponding labels.
+    cost_subgrad_beta = theano.function(
+        [C, bias, beta, phi, y],
+        T.grad(cost_sym, beta)
     )
-    cost_subgrad = theano.function(
-        [C, beta, phi, y, m],
-        cost_subgrad_sym
+    cost_subgrad_bias = theano.function(
+        [C, bias, beta, phi, y],
+        T.grad(cost_sym, bias)
     )
     # hypothesis function computing the probability of n test samples
     # whose latent vectors are stored in phi.
@@ -57,9 +55,12 @@ def _compile_funcs():
         [beta, phi],
         T.nnet.sigmoid(T.dot(phi, beta))
     )
-    return (cost, cost_subgrad, hypothesis)
 
-log_cost, log_cost_subgrad, log_hypothesis = _compile_funcs()
+    return (cost, cost_subgrad_beta, cost_subgrad_bias, hypothesis)
+
+log_cost, log_cost_subgrad_beta, log_cost_subgrad_bias, log_hypothesis = (
+    _compile_funcs()
+)
 
 class BinaryLLR:
     def __init__(self, latent_function, C, latent_args=None, 
@@ -124,25 +125,23 @@ class BinaryLLR:
             model      model vector to compute the cost for.
         """
         # Put latent vectors in a data structure suitable for Theano.
-        nb_pos, nb_featuresp1 = poslatents.shape[0:2]
-        latents = np.empty([nb_pos + len(negatives), nb_featuresp1])
+        nb_pos, nb_features = poslatents.shape[0:2]
+        latents = np.empty([nb_pos + len(negatives), nb_features])
         latents[0:nb_pos] = poslatents
         biaslessmodel = model[1:]
         for i in range(len(negatives)):
             # Compute the latent vector.
-            latents[nb_pos+i,1:] = self.latent_function(
+            latents[nb_pos+i] = self.latent_function(
                 biaslessmodel,
                 negatives[i],
                 self.latent_args
             )
-        # Set biases for negative latent vectors.
-        latents[nb_pos:,0] = 1
         # Set up labels.
         labels = np.empty([nb_pos + len(negatives)], dtype=np.int32)
         labels[0:nb_pos] = 1
         labels[nb_pos:] = -1
 
-        return log_cost(self.C, model, latents, labels)
+        return log_cost(self.C, model[0], biaslessmodel, latents, labels)
 
     def cost_stochastic_subgradient(self, poslatents, negatives,
                                     nb_batches, model, labelledsamples):
@@ -165,7 +164,7 @@ class BinaryLLR:
         # Set up data structure for Theano.
         nb_featuresp1 = model.size
         nb_samples = len(labelledsamples)
-        latents = np.empty([nb_samples, nb_featuresp1])
+        latents = np.empty([nb_samples, nb_featuresp1-1])
         labels = np.empty([nb_samples], dtype=np.int32)
         biaslessmodel = model[1:]
         
@@ -175,15 +174,21 @@ class BinaryLLR:
                 latents[i] = poslatents[idx]
                 labels[i] = 1
             else:
-                latents[i,1:] = self.latent_function(
+                latents[i] = self.latent_function(
                     biaslessmodel,
                     negatives[idx],
                     self.latent_args
                 )
-                latents[i,0] = 1
                 labels[i] = -1
-        
-        return log_cost_subgrad(self.C, model, latents, labels, 1)
+        beta = model[1:]
+        bias = model[0]
+        betasub = log_cost_subgrad_beta(self.C, bias, beta, latents, labels)
+        biassub = log_cost_subgrad_bias(self.C, bias, beta, latents, labels)
+        subgrad = np.empty([model.size])
+        subgrad[0] = biassub
+        subgrad[1:] = betasub
+
+        return subgrad
 
     def fit(self, positives, negatives, initmodel, nbiter=2, 
             nb_opt_iter=100, learning_rate=0.01):
@@ -220,7 +225,7 @@ class BinaryLLR:
                 print "Running iteration " + repr(t)
                 print "Computing latent vectors for positive samples..."
             # Compute latent vectors for positive samples.
-            poslatents = np.empty([len(positives), nb_features + 1])
+            poslatents = np.empty([len(positives), nb_features])
             
             for i in range(len(positives)):
                 latvec = self.latent_function(
@@ -228,9 +233,7 @@ class BinaryLLR:
                     positives[i],
                     self.latent_args
                 )
-                poslatents[i,1:nb_features+1] = latvec
-                # bias
-                poslatents[i,0] = 1
+                poslatents[i] = latvec
             if self.verbose:
                 print "Optimizing the cost function for fixed positive latents..."
             # Optimizes the cost function for the fixed positive
@@ -292,7 +295,6 @@ class BinaryLLR:
         nb_samples = len(samples)
         nb_featuresp1 = self.model.size
         phi = np.empty([nb_samples, nb_featuresp1])
-        # Set the biases.
         phi[:,0] = 1
         # Compute the latent vectors.
         biaslessmodel = self.model[1:]
@@ -303,7 +305,11 @@ class BinaryLLR:
                 self.latent_args
             )
         # Compute all the probabilities in one go.
-        return log_hypothesis(self.model, phi)
+        zerobias = np.empty([self.model.size])
+        zerobias[0] = 0
+        zerobias[1:] = biaslessmodel
+
+        return log_hypothesis(zerobias, phi)
 
 def _dummy_latent_function(model, sample, args):
     return sample
@@ -315,7 +321,7 @@ class BinaryLR:
     def __init__(self, C, verbose=False):
         self.llr = BinaryLLR(_dummy_latent_function, C, verbose=verbose)
     
-    def fit(self, X, y, nb_iter=100, learning_rate=0.01):
+    def fit(self, X, y, nb_iter=100, learning_rate=0.1):
         nb_samples, nb_features = X.shape
         positives = []
         negatives = []
@@ -329,6 +335,7 @@ class BinaryLR:
                      nbiter=1, nb_opt_iter=nb_iter, 
                      learning_rate=learning_rate)
         self.coef_ = self.llr.model[1:]
+        self.intercept_ = self.llr.model[0]
     
     def predict_proba(self, X):
         nb_samples = X.shape[0]
