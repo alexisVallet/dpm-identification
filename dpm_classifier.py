@@ -6,7 +6,8 @@ import cv2
 from matching import match_part
 from dpm import DPM, vectortodpm
 from warpclassifier import WarpClassifier
-from latent_lr import BinaryLLR
+from latent_lr import LatentLR
+from latent_mlr import LatentMLR
 from features import max_energy_subwindow, compute_featmap
 
 def _best_match(dpm, featmap, debug=False):
@@ -114,7 +115,7 @@ class BinaryDPMClassifier:
         # Initialize the model by training a warping classifier on all
         # images, and greedily taking square high energy subwindows as
         # parts.
-        warp = WarpClassifier(self.feature, self.mindimdiv, self.C)
+        warp = WarpClassifier(self.feature, self.mindimdiv, C=self.C)
         warp.train(positives, negatives)
         warpmap = np.array(warp.model_featmap, copy=True)
 
@@ -156,15 +157,14 @@ class BinaryDPMClassifier:
         negmaps = map(self.tofeatmap, negatives)
         # Train the DPM using binary LLR.
         modelsize = initdpm.size()
-        self.llr = BinaryLLR(
+        self.llr = LatentLR(
             _best_match_wrapper,
-            C=self.C, 
             latent_args={'modelsize': modelsize, 'debug': self.debug},
             verbose=self.verbose
         )
-        self.llr.fit(posmaps, negmaps, initdpm.tovector())
+        self.llr.train(self.C, posmaps, negmaps, initdpm.tovector(), 0)
         # For vizualisation, compute the trained DPM
-        self.dpm = vectortodpm(self.llr.model[1:], modelsize)
+        self.dpm = vectortodpm(self.llr.coef_, modelsize)
 
     def predict_proba(self, images):
         """ Predicts probabilities that images are positive samples.
@@ -179,3 +179,4 @@ class BinaryDPMClassifier:
         # Use the internal latent logistic regression to predict 
         # probabilities.
         return self.llr.predict_proba(fmaps)
+

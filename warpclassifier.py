@@ -5,7 +5,87 @@ import numpy as np
 
 import features as feat
 from latent_lr import BinaryLR
+from latent_mlr import MLR
 import lr
+
+class MultiWarpClassifier:
+    def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01,
+                 nb_iter=1000, lrimpl='sklearn', verbose=False):
+        assert lrimpl in ['llr', 'sklearn']
+        self.feature = feature
+        self.mindimdiv = mindimdiv
+        self.C = C
+        self.learning_rate = learning_rate
+        self.nb_iter = nb_iter
+        self.lrimpl = lrimpl
+        self.verbose = verbose
+
+    def train(self, samples, labels):
+        fmaps, self.nbrowfeat, self.nbcolfeat = feat.warped_fmaps_simple(
+            samples, self.mindimdiv, self.feature
+        )
+        nb_samples = len(samples)
+        nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
+        self.labels_set = list(set(labels))
+        label_to_int = {}
+
+        for i in range(len(self.labels_set)):
+            label_to_int[self.labels_set[i]] = i
+
+        X = np.empty([nb_samples, nb_features])
+        y = np.empty([nb_samples], dtype=np.int32)
+        
+        # Compute feature maps and int labels.
+        for i in range(nb_samples):
+            X[i] = fmaps[i].flatten('C')
+            y[i] = label_to_int[labels[i]]
+
+
+        if self.lrimpl == 'llr':
+            self.lr = MLR(
+                self.C,
+                nb_iter=self.nb_iter,
+                learning_rate=self.learning_rate,
+                verbose=self.verbose
+            )
+            self.lr.fit(X, y)
+        elif self.lrimpl == 'sklearn':
+            self.lr = LogisticRegression(
+                C=self.C
+            )
+            self.lr.fit(X, y)
+
+    def predict_proba(self, samples):
+        X = np.empty([
+            len(samples),
+            self.nbrowfeat * self.nbcolfeat * self.feature.dimension
+        ])
+
+        for i in range(len(samples)):
+            X[i] = feat.compute_featmap(
+                samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
+            )
+        
+        return self.lr.predict_proba(X)
+
+    def predict(self, samples):
+        X = np.empty([
+            len(samples),
+            self.nbrowfeat * self.nbcolfeat * self.feature.dimension
+        ])
+
+        for i in range(len(samples)):
+            X[i] = feat.compute_featmap(
+                samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
+            ).flatten('C')
+        
+        intlabels = self.lr.predict(X)
+        labels = []
+
+        for i in range(len(samples)):
+            labels.append(self.labels_set[intlabels[i]])
+
+        return labels
 
 class WarpClassifier:
     def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01, 
@@ -58,8 +138,8 @@ class WarpClassifier:
             i += 1
         
         if self.lrimpl == 'llr':
-            self.logregr = BinaryLR(self.C, verbose=self.verbose)
-            self.logregr.fit(X, y, nb_iter=self.nbiter, learning_rate=self.learning_rate)
+            self.logregr = BinaryLR(verbose=self.verbose)
+            self.logregr.fit(X, y, nb_iter=self.nbiter, learning_rate=self.learning_rate, C=self.C)
         elif self.lrimpl == 'theano':
             self.logregr = lr.LogisticRegression(
                 self.C, 

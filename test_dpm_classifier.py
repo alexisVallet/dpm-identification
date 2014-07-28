@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, roc_auc_score
 
 from dpm_classifier import BinaryDPMClassifier
-from calibration import LogisticCalibrator
 from ioutils import load_data
 from features import Feature
 
@@ -38,19 +37,16 @@ class TestDPMClassifier(unittest.TestCase):
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
         C = 0.1
-        nbparts = 1
-        classifier = LogisticCalibrator(
-            BinaryDPMClassifier(
-                C,
-                feature,
-                mindimdiv,
-                nbparts,
-                verbose=False,
-                debug=False
-            ),
-            verbose=False
+        nbparts = 4
+        classifier = BinaryDPMClassifier(
+            C,
+            feature,
+            mindimdiv,
+            nbparts,
+            verbose=True,
+            debug=False
         )
-        label = 'asuka_langley'
+        label = 'rei_ayanami'
         positives = self.traindata[label]
         negatives = reduce(lambda l1,l2:l1+l2,
                            [self.traindata[l] for l in self.traindata
@@ -58,8 +54,8 @@ class TestDPMClassifier(unittest.TestCase):
         print "training..."
         classifier.train(positives, negatives)
         # Display the learned DPM
-        print "Deformations: " + repr(classifier.classifier.dpm.deforms)
-        image = classifier.classifier.dpm.partsimage(feature.visualize)
+        print "Deformations: " + repr(classifier.dpm.deforms)
+        image = classifier.dpm.partsimage(feature.visualize)
         winname = 'learned dpm'
         cv2.namedWindow(winname, cv2.WINDOW_NORMAL)
         cv2.imshow(winname, image)

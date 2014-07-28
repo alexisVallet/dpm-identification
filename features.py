@@ -252,6 +252,27 @@ def max_energy_subwindow(featmap, winsize):
     
     return (np.array(maxsubwin, copy=True), maxanchor)
 
+def warped_fmaps_simple(samples, mindimdiv, feature):
+    # Find out the average aspect ratio across
+    # positive samples. Use that value to define
+    # the feature map dimensions.
+    meanar = np.mean(map(lambda s: float(s.shape[1]) / s.shape[0],
+                         samples))
+    # Basic algebra to get the corresponding number of rows/cols
+    # from the desired minimum dimension divisions.
+    nbrowfeat = None
+    nbcolfeat = None
+
+    if meanar > 1:
+        nbrowfeat = mindimdiv
+        nbcolfeat = mindimdiv * meanar
+    else:
+        nbrowfeat = int(mindimdiv / meanar)
+        nbcolfeat = mindimdiv
+    
+    tofeatmap = lambda s: compute_featmap(s, nbrowfeat, nbcolfeat, feature)
+    return (map(tofeatmap, samples), nbrowfeat, nbcolfeat)
+
 def warped_fmaps(positives, negatives, mindimdiv, feature):
     """ Computes feature maps warped to the mean positive aspect ratio.
 

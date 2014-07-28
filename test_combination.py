@@ -9,7 +9,6 @@ from sklearn.metrics import roc_curve, roc_auc_score
 from combination import Combination
 from dpm_classifier import BinaryDPMClassifier
 from warpclassifier import WarpClassifier
-from calibration import LogisticCalibrator
 from ioutils import load_data
 from features import Feature
 
@@ -38,28 +37,23 @@ class TestDPMClassifier(unittest.TestCase):
     def test_binary_dpm_combination(self):
         nbbins = (4,4,4)
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
-        warpmindimdiv = 10
+        warpmindimdiv = 5
         C = 0.1
-        nbparts = 1
+        nbparts = 2
         classifier = Combination([
-            LogisticCalibrator(
-                WarpClassifier(
-                    feature,
-                    warpmindimdiv,
-                    C,
-                    verbose=True
-                )
+            WarpClassifier(
+                feature,
+                warpmindimdiv,
+                C,
+                verbose=True
             ),
-            LogisticCalibrator(
-                BinaryDPMClassifier(
-                    C,
-                    feature,
-                    warpmindimdiv * 2,
-                    nbparts,
-                    verbose=True,
-                    debug=False
-                ),
-                verbose=False
+            BinaryDPMClassifier(
+                C,
+                feature,
+                warpmindimdiv * 2,
+                nbparts,
+                verbose=True,
+                debug=False
             )
         ])
             
@@ -90,6 +84,16 @@ class TestDPMClassifier(unittest.TestCase):
         print repr(threshs)
         plt.plot(fpr, tpr)
         plt.show()
+
+        for c in classifier.classifiers:
+            probas = c.predict_proba(testsamples)
+            print "computing ROC curve"
+            fpr, tpr, threshs = roc_curve(binlabels, probas)
+            print "auc: " + repr(roc_auc_score(binlabels, probas))
+            print "thresholds:"
+            print repr(threshs)
+            plt.plot(fpr, tpr)
+            plt.show()
 
 if __name__ == "__main__":
     unittest.main()
