@@ -54,7 +54,7 @@ class TestMultiWarpClassifier(unittest.TestCase):
             learning_rate=0.01,
             nb_iter=100,
             lrimpl='llr',
-            verbose=False
+            verbose=True
         )
 
         trainsamples = []

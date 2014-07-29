@@ -6,7 +6,7 @@ import theano.tensor as T
 
 class LatentMLR:
     def __init__(self, C, latent_function, latent_args, initbeta,
-                 nb_coord_iter=1, nb_gd_iter=100, learning_rate=0.01, 
+                 nb_coord_iter=1, nb_gd_iter=100, learning_rate=0.01,
                  verbose=False):
         # Basic parameters.
         self.C = C
@@ -20,10 +20,14 @@ class LatentMLR:
         # Theano shared variables and model information.
         self.nb_features, self.nb_classes = initbeta.shape
         self.beta = theano.shared(
-            initbeta.astype(theano.config.floatX)
+            initbeta.astype(theano.config.floatX),
+            name='beta',
+            borrow=True
         )
         self.b = theano.shared(
-            np.zeros(self.nb_classes, dtype=theano.config.floatX)
+            np.zeros((self.nb_classes,), dtype=theano.config.floatX),
+            name='b',
+            borrow=True
         )
         # Compile common theano functions.
         self.compile_funcs()
@@ -53,9 +57,13 @@ class LatentMLR:
         self.nb_classes = params['nb_classes']
         self.beta = theano.shared(
             params['beta'],
+            name='beta',
+            borrow=True
         )
         self.b = theano.shared(
             params['b'],
+            name='b',
+            borrow=True
         )
         self.compile_funcs()
 
@@ -84,25 +92,35 @@ class LatentMLR:
         # Set and compile the theano gradient descent update function.
         lat_pos = theano.shared(
             np.empty([nb_samples, self.nb_features],
-                     dtype=theano.config.floatX)
+                     dtype=theano.config.floatX),
+            name='lat_pos'
         )
         lat_neg = theano.shared(
             np.empty([nb_samples, self.nb_features],
-                     dtype=theano.config.floatX)
+                     dtype=theano.config.floatX),
+            name='lat_neg'
         )
-        flat = lambda t: T.reshape(t, [T.prod(t.shape)])
         # Cost function.
-        sample_betas = self.beta[T.arange(nb_samples), labels].T
-        cost = (
-            0.5 * (T.dot(flat(self.beta), flat(self.beta)) 
-                   + T.dot(self.b, self.b))
-            - self.C * T.sum(
-                T.log(
-                    T.exp(T.batched_dot(lat_pos, sample_betas) + self.b) /
-                    T.sum(T.exp(T.dot(lat_neg, self.beta) + self.b), axis=1)
-                )
-            )
+        regularization = (
+            0.5 * (T.dot(T.flatten(self.beta), T.flatten(self.beta)) 
+                   + T.dot(T.flatten(self.b), T.flatten(self.b)))
         )
+        
+        posdot = (T.dot(lat_pos, self.beta) + self.b)[
+            T.arange(nb_samples), 
+            labels
+        ]
+        losses = T.log(
+            T.exp(posdot) /
+            T.reshape(
+                T.exp(T.dot(lat_neg, self.beta) + self.b).sum(axis=1,
+                                                              keepdims=True),
+                (nb_samples,))
+        )
+        cost = (
+            regularization - self.C * T.sum(losses)
+        )
+
         # Gradients.
         grad_beta = T.grad(cost, self.beta)
         grad_b = T.grad(cost, self.b)
@@ -115,8 +133,8 @@ class LatentMLR:
         grad_descent = theano.function(
             inputs=[],
             outputs=[cost, 
-                     T.sqrt(T.dot(flat(grad_beta), flat(grad_beta))
-                            + T.dot(flat(grad_b), flat(grad_b)))],
+                     T.sqrt(T.dot(T.flatten(grad_beta), T.flatten(grad_beta))
+                            + T.dot(T.flatten(grad_b), T.flatten(grad_b)))],
             updates=updates            
         )
         new_lat_pos = None
@@ -154,9 +172,6 @@ class LatentMLR:
                     print "Epoch " + repr(t_gd + 1)
                     print "Cost: " + repr(cost)
                     print "Gradient norm: " + repr(gradnorm)
-
-                if gradnorm < eps:
-                    break
         bestbeta, bestb = bestmodel
         self.b.set_value(bestb)
         self.beta.set_value(bestbeta)
@@ -218,4 +233,12 @@ class MLR:
         for i in range(X.shape[0]):
             samples.append(X[i])
         
-        return self.lmlr.predict_proba(self, samples)
+        return self.lmlr.predict_proba(samples)
+
+    def predict(self, X):
+        samples = []
+
+        for i in range(X.shape[0]):
+            samples.append(X[i])
+        
+        return self.lmlr.predict(samples)
