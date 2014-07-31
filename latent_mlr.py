@@ -139,9 +139,18 @@ class LatentMLR:
                             + T.dot(T.flatten(grad_b), T.flatten(grad_b)))],
             updates=updates            
         )
-        new_lat_pos = None
-        new_lat_neg = None
-        bestmodel = None
+        new_lat_pos = np.empty(
+            [nb_samples, self.nb_features],
+            dtype=theano.config.floatX
+        )
+        new_lat_neg = np.empty(
+            [nb_samples, self.nb_features],
+            dtype=theano.config.floatX
+        )
+        bestmodel = np.empty(
+            [self.nb_features, self.nb_classes],
+            dtype=theano.config.floatX
+        )
         bestcost = np.inf
 
         for t_coord in range(self.nb_coord_iter):
@@ -243,7 +252,10 @@ class MLR:
         nb_classes = np.unique(y).size
         
         self.lmlr = LatentMLR(self.C, _dummy_latent, None,
-                              np.zeros([nb_features, nb_classes]), 
+                              np.zeros(
+                                  [nb_features, nb_classes],
+                                  dtype=theano.config.floatX
+                              ), 
                               nb_coord_iter=1,
                               nb_gd_iter=self.nb_iter, 
                               learning_rate=self.learning_rate,
@@ -251,7 +263,7 @@ class MLR:
         samples = []
 
         for i in range(nb_samples):
-            samples.append(X[i])
+            samples.append(X[i].astype(theano.config.floatX))
         self.lmlr.fit(samples, y)
         self.intercept_ = self.lmlr.intercept_
         self.coef_ = self.lmlr.coef_

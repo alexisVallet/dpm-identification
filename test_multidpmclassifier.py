@@ -42,7 +42,7 @@ class TestDPMClassifier(unittest.TestCase):
             mindimdiv,
             nbparts,
             nb_coord_iter=4,
-            nb_gd_iter=50,
+            nb_gd_iter=100,
             learning_rate=0.01,
             verbose=True
         )
