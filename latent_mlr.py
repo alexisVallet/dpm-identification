@@ -57,13 +57,11 @@ class LatentMLR:
         self.nb_classes = params['nb_classes']
         self.beta = theano.shared(
             params['beta'],
-            name='beta',
-            borrow=True
+            name='beta'
         )
         self.b = theano.shared(
             params['b'],
-            name='b',
-            borrow=True
+            name='b'
         )
         self.compile_funcs()
 

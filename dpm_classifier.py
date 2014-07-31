@@ -65,7 +65,18 @@ def _best_match(dpm, featmap, debug=False):
     subwins = [res[0] for res in winsanddisp]
     displacements = [res[1:3] for res in winsanddisp]
 
-    return (subwins, displacements)
+    # Scale displacements linearly to the [-1;1] range to keep them
+    # at a scale comparable to subwindows. The squared displacements are 
+    # limited to a range of leading_fmap_dim^2 in value. We'll
+    # assume that all feature maps are warped to the same dimension.
+    leading_dim = max(featmap.shape[0], featmap.shape[1])**2
+    scaled_disp = []
+
+    for i in range(len(dpm.parts)):
+        di, dj = displacements[i]
+        scaled_disp.append((float(di) / leading_dim, float(dj) / leading_dim))
+
+    return (subwins, scaled_disp)
 
 def _best_match_wrapper(modelvector, featmap, args):
     """ Wrapper to _best_match to convert everything into the proper
@@ -90,6 +101,9 @@ def _best_match_wrapper(modelvector, featmap, args):
     # Introduce the part displacements.
     for disp in displacements:
         di, dj = disp
+        if abs(di) > 30 or abs(dj) > 30:
+            print "Invalid displacements: "
+            print (di, dj)
         latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
         offset = offset+4
     assert offset == modelvector.size
@@ -192,8 +206,9 @@ def _best_matches(beta, fmaps, labels, args):
                        dtype=theano.config.floatX)
 
     for i in range(nb_samples):
-        latents[i,:] = _best_match_wrapper(beta[:,labels[i]], fmaps[i], args)
-    
+        latvec = _best_match_wrapper(beta[:,labels[i]], fmaps[i], args)
+        latents[i] = latvec
+
     return latents
 
 class MultiDPMClassifier:
