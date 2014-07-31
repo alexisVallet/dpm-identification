@@ -69,9 +69,13 @@ class LatentMLR:
 
     def compile_funcs(self):
         # Prediction function.
-        test_lat = T.matrix('test_lat')
+        # Test_lat is a nb_classes * nb_samples * nb_features
+        # tensor containing, for each class, the latent vectors for
+        # each test sample. This format allows the use of theano's
+        # batched_dot function to compute all the scores in one go.
+        test_lat = T.tensor3('test_lat')
         predict_proba_sym = (
-            T.nnet.sigmoid(T.dot(test_lat, self.beta) + self.b)
+            T.nnet.sigmoid(T.batched_dot(test_lat, self.beta.T).T + self.b)
         )
         self._predict_proba = theano.function(
             [test_lat],
@@ -147,6 +151,7 @@ class LatentMLR:
             new_lat_pos = self.latent_function(
                 self.beta.get_value(),
                 samples,
+                labels,
                 self.latent_args
             )
             lat_pos.set_value(new_lat_pos)
@@ -156,6 +161,7 @@ class LatentMLR:
                 new_lat_neg = self.latent_function(
                     self.beta.get_value(),
                     samples,
+                    labels,
                     self.latent_args
                 )
                 lat_neg.set_value(new_lat_neg)
@@ -179,24 +185,49 @@ class LatentMLR:
         self.coef_ = self.beta.get_value()
 
     def predict_proba(self, samples):
-        latents = self.latent_function(
-            self.beta.get_value(),
-            samples,
-            self.latent_args
+        nb_samples = len(samples)
+        beta_value = self.beta.get_value()
+        nb_features, nb_classes = beta_value.shape
+        test_latents = np.empty(
+            [nb_classes, nb_samples, nb_features],
+            dtype=theano.config.floatX
         )
 
-        return self._predict_proba(latents)
+        # Compile all latent values for each class in the test_latents
+        # 3D tensor.
+        for l in range(nb_classes):
+            test_latents[l] = self.latent_function(
+                beta_value,
+                samples,
+                np.repeat([l], nb_samples),
+                self.latent_args
+            )
+
+        # Run the theano prediction function over it.
+        return self._predict_proba(test_latents)
 
     def predict(self, samples):
-        latents = self.latent_function(
-            self.beta.get_value(),
-            samples,
-            self.latent_args
+        nb_samples = len(samples)
+        beta_value = self.beta.get_value()
+        nb_features, nb_classes = beta_value.shape
+        test_latents = np.empty(
+            [nb_classes, nb_samples, nb_features],
+            dtype=theano.config.floatX
         )
 
-        return self._predict_label(latents)
+        # Compile all latent values for each class in the test_latents
+        # 3D tensor.
+        for l in range(nb_classes):
+            test_latents[l] = self.latent_function(
+                beta_value,
+                samples,
+                np.repeat([l], nb_samples),
+                self.latent_args
+            )
 
-def _dummy_latent(beta, samples, args):
+        return self._predict_label(test_latents)
+
+def _dummy_latent(beta, samples, labels, args):
     return np.vstack(samples)
 
 class MLR:

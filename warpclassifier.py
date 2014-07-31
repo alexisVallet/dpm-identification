@@ -10,7 +10,7 @@ import lr
 
 class MultiWarpClassifier:
     def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01,
-                 nb_iter=1000, lrimpl='sklearn', verbose=False):
+                 nb_iter=100, lrimpl='sklearn', verbose=False):
         assert lrimpl in ['llr', 'sklearn']
         self.feature = feature
         self.mindimdiv = mindimdiv
@@ -54,6 +54,16 @@ class MultiWarpClassifier:
                 C=self.C
             )
             self.lr.fit(X, y)
+
+        # Store the learned "feature map" for each class in its proper shape.
+        self.model_featmaps = []
+
+        for i in range(self.lr.coef_.shape[1]):
+            self.model_featmaps.append(
+                self.lr.coef_[:,i].reshape(
+                    (self.nbrowfeat, self.nbcolfeat, self.feature.dimension)
+                )
+            )
 
     def predict_proba(self, samples):
         X = np.empty([
