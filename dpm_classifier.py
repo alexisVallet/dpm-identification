@@ -17,7 +17,11 @@ def _init_dpm(warpmap, nbparts, partsize):
     """
     initparts = []
     initanchors = []
-    initdeforms = []
+    # Initialize deformation to 0.1 times the square leading dimension.
+    # This is to counteract to some extent the effect of feature scaling
+    # on displacements.
+    leading_dim = max(warpmap.shape[0], warpmap.shape[1])**2
+    initdeforms = [leading_dim * np.array([0,0,0.1,0.1])] * nbparts
     warpcopy = np.array(warpmap, copy=True)
     
     for i in range(nbparts):
@@ -29,7 +33,6 @@ def _init_dpm(warpmap, nbparts, partsize):
         )
         initparts.append(warpmap[ai:ai+partsize,aj:aj+partsize])
         initanchors.append(np.array([ai, aj]))
-        initdeforms.append(np.array([0,0,0.1,0.1]))
         warpcopy[ai:ai+partsize,aj:aj+partsize] = 0
     return DPM(initparts, initanchors, initdeforms)
 

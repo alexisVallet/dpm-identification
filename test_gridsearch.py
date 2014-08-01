@@ -1,14 +1,15 @@
+""" Unit tests for the GridSearch  class.
+"""
 import unittest
 import numpy as np
-import cv2
-import cPickle as pickle
-import os.path
 
-from dpm_classifier import MultiDPMClassifier
+from warpclassifier import MultiWarpClassifier
+from grid_search import GridSearch
 from ioutils import load_data
 from features import Feature
 
-class TestDPMClassifier(unittest.TestCase):
+
+class TestGridSearch(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         print "loading data..."
@@ -30,43 +31,51 @@ class TestDPMClassifier(unittest.TestCase):
                 else:
                     cls.traindata[label] += folddata[label]
 
-    def test_binary_dpm_classifier(self):
+    def test_classifier(self):
+        """ Tests one vs all classification.
+        """
+        # Prepare training data.
+        trainsamples = []
+        trainlabels = []
+        
+        for l in self.traindata:
+            for s in self.traindata[l]:
+                trainsamples.append(s)
+                trainlabels.append(l)
+        
+        # Run training.
         nbbins = (4,4,4)
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
-        mindimdiv = 10
-        C = 0.1
-        nbparts = 4
-        classifier = MultiDPMClassifier(
-            C,
-            feature,
-            mindimdiv,
-            nbparts,
-            nb_coord_iter=4,
-            nb_gd_iter=50,
-            learning_rate=0.01,
+        mindimdiv = [5, 10, 20]
+        C = [1, 0.1, 0.01]
+        learning_rate = [0.1, 0.01, 0.001]
+        classifier = GridSearch(
+            lambda args: MultiWarpClassifier(
+                feature,
+                args['mdd'],
+                args['C'],
+                learning_rate=args['lr'],
+                nb_iter=100,
+                lrimpl='llr',
+                verbose=True
+            ),{
+                'mdd': mindimdiv,
+                'C': C,
+                'lr': learning_rate
+            },
+            k=3,
             verbose=True
         )
 
         trainsamples = []
         trainlabels = []
-
+        
         for k in self.traindata:
             for s in self.traindata[k]:
                 trainsamples.append(s)
                 trainlabels.append(k)
 
-        print "Training..."
-        cachename = 'data/dpmid-cache/test_lmlr_dpm_50'
-        if os.path.isfile(cachename):
-            cachefile = open(cachename)
-            classifier = pickle.load(cachefile)
-            cachefile.close()
-        else:
-            classifier.train(trainsamples, trainlabels)
-            cachefile = open(cachename, 'w')
-            pickle.dump(classifier, cachefile)
-            cachefile.close()
-        print "Prediction..."
+        classifier.train(trainsamples, trainlabels)
 
         testsamples = []
         expected = []
