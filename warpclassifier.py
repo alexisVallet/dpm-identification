@@ -21,11 +21,19 @@ class MultiWarpClassifier:
         self.verbose = verbose
 
     def train(self, samples, labels):
-        fmaps, self.nbrowfeat, self.nbcolfeat = feat.warped_fmaps_simple(
-            samples, self.mindimdiv, self.feature
+        # Compute feature maps, performing dimensionality reduction on
+        # features while at it.
+        fmaps, self.nbrowfeat, self.nbcolfeat, pca = (
+            feat.warped_fmaps_dimred(
+                samples, self.mindimdiv, self.feature
+            )
         )
+        self.pca = pca
+        self.featdim = fmaps[0].shape[2]
+        if self.verbose:
+            print "Reduced feature dimension to " + repr(self.featdim)
         nb_samples = len(samples)
-        nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
+        nb_features = self.nbrowfeat * self.nbcolfeat * self.featdim
         self.labels_set = list(set(labels))
         label_to_int = {}
 
@@ -55,17 +63,19 @@ class MultiWarpClassifier:
             )
             self.lr.fit(X, y)
 
-        # Store the learned "feature map" for each class in its proper shape.
+        # Store the learned "feature map" for each class in its proper 
+        # shape, projected back into to the original space.
         self.model_featmaps = []
 
         for i in range(self.lr.coef_.shape[1]):
             self.model_featmaps.append(
                 self.lr.coef_[:,i].reshape(
-                    (self.nbrowfeat, self.nbcolfeat, self.feature.dimension)
+                    (self.nbrowfeat, self.nbcolfeat, self.featdim)
                 )
             )
 
     def predict_proba(self, samples):
+        # Compute a data matrix without dimensionality reduction.
         X = np.empty([
             len(samples),
             self.nbrowfeat * self.nbcolfeat * self.feature.dimension
@@ -74,9 +84,20 @@ class MultiWarpClassifier:
         for i in range(len(samples)):
             X[i] = feat.compute_featmap(
                 samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
-            )
+            ).flatten('C')
+        # Project the test data using PCA.
+        X_ = np.reshape(
+            self.pca.transform(
+                np.reshape(
+                    X, 
+                    [len(samples)*self.nbrowfeat*self.nbcolfeat, 
+                     self.feature.dimension]
+                )
+            ),
+            [len(samples), self.nbrowfeat*self.nbcolfeat*self.featdim]
+        )
         
-        return self.lr.predict_proba(X)
+        return self.lr.predict_proba(X_)
 
     def predict(self, samples):
         X = np.empty([
@@ -88,8 +109,19 @@ class MultiWarpClassifier:
             X[i] = feat.compute_featmap(
                 samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
             ).flatten('C')
-        
-        intlabels = self.lr.predict(X)
+        # Project the test data using PCA.
+        X_ = np.reshape(
+            self.pca.transform(
+                np.reshape(
+                    X, 
+                    [len(samples)*self.nbrowfeat*self.nbcolfeat, 
+                     self.feature.dimension]
+                )
+            ),
+            [len(samples), self.nbrowfeat*self.nbcolfeat*self.featdim]
+        )
+
+        intlabels = self.lr.predict(X_)
         labels = []
 
         for i in range(len(samples)):
