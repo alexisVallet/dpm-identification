@@ -6,8 +6,7 @@ import theano
 
 from matching import match_part
 from dpm import DPM, vectortodpm
-from warpclassifier import WarpClassifier, MultiWarpClassifier
-from latent_lr import LatentLR
+from warpclassifier import MultiWarpClassifier
 from latent_mlr import LatentMLR
 from features import max_energy_subwindow, compute_featmap, warped_fmaps_simple
 
@@ -112,107 +111,6 @@ def _best_match_wrapper(modelvector, featmap, args):
     assert offset == modelvector.size
 
     return latvec
-
-class BinaryDPMClassifier:
-    def __init__(self, C, feature, mindimdiv, nbparts, verbose=False,
-                 debug=False):
-        """ Initializes the classifier with a given number of parts.
-        
-        Arguments:
-            C         Soft margin parameter for latent logistic regression.
-            feature   Feature function to use for individual image patches.
-            mindimdiv Number of splits along each image's smallest dimension.
-            nbparts   Number of parts to train the classifier with.
-            verbose   Set to True for regular information messages.
-            debug     If set to True, will stop execution at various point
-                      showing the current model being trained.
-        """
-        self.C = C
-        self.feature = feature
-        self.mindimdiv = mindimdiv
-        self.nbparts = nbparts
-        self.verbose = verbose
-        self.debug = debug
-
-    def tofeatmap(self, image):
-        return compute_featmap(
-            image, self.nbrowfeat, self.nbcolfeat, self.feature
-        )
-
-    def train(self, positives, negatives):
-        """ Fits the classifier given a set of positive images and a set
-            of negative images.
-        
-        Arguments:
-            positives    array of positive images, i.e. the classifier 
-                         should return a probability close to 1 for them.
-            negatives    array of negative images, i.e. the classifier 
-                         should return a probability close to 0 for them.
-        """
-        # Initialize the model by training a warping classifier on all
-        # images, and greedily taking square high energy subwindows as
-        # parts.
-        warp = WarpClassifier(self.feature, self.mindimdiv, C=self.C)
-        warp.train(positives, negatives)
-        warpmap = np.array(warp.model_featmap, copy=True)
-
-        if self.debug:
-            cv2.namedWindow('warped', cv2.WINDOW_NORMAL)
-            cv2.imshow('warped', self.feature.vis_featmap(warpmap))
-            cv2.waitKey(0)
-
-        partsize = self.mindimdiv // 2
-        
-        initdpm = _init_dpm(warpmap, self.nbparts, partsize)
-
-        if self.debug:
-            cv2.namedWindow('allparts', cv2.WINDOW_NORMAL)
-            cv2.imshow(
-                'allparts', 
-                initdpm.partsimage(self.feature.visualize)
-            )
-            cv2.waitKey(0)
-        # Compute feature maps for all samples.
-        self.nbrowfeat = warp.nbrowfeat
-        self.nbcolfeat = warp.nbcolfeat
-        posmaps = map(self.tofeatmap, positives)
-        negmaps = map(self.tofeatmap, negatives)
-        # Train the DPM using binary LLR.
-        modelsize = initdpm.size()
-        self.llr = LatentLR(
-            _best_match_wrapper,
-            latent_args={'modelsize': modelsize, 'debug': self.debug},
-            verbose=self.verbose
-        )
-        self.llr.train(self.C, posmaps, negmaps, initdpm.tovector(), 0)
-        # For vizualisation, compute the trained DPM
-        self.dpm = vectortodpm(self.llr.coef_, modelsize)
-
-    def predict_proba(self, images):
-        """ Predicts probabilities that images are positive samples.
-
-        Arguments:
-            images    image to predict probabilities for.
-        """
-        assert self.llr != None
-
-        fmaps = map(self.tofeatmap, images)
-        
-        # Use the internal latent logistic regression to predict 
-        # probabilities.
-        return self.llr.predict_proba(fmaps)
-
-def _best_matches(beta, fmaps, labels, args):
-    nb_features, nb_classes = beta.shape
-    nb_samples = len(fmaps)
-    latents = np.empty([nb_samples, nb_features], 
-                       dtype=theano.config.floatX)
-
-    for i in range(nb_samples):
-        latvec = _best_match_wrapper(beta[:,labels[i]], fmaps[i], args)
-        latents[i] = latvec
-
-    return latents
 
 class MultiDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial

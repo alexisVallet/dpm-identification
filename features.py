@@ -10,7 +10,8 @@ class Feature:
     """
     _featnames = [
         'labhist', # L*a*b* color histogram
-        'bgrhist'  # BGR color histogram
+        'bgrhist',  # BGR color histogram
+        'hog' # HoG features
     ]
 
     def __init__(self, featname, dimension, params):

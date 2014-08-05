@@ -8,7 +8,6 @@ from grid_search import GridSearch
 from ioutils import load_data
 from features import Feature
 
-
 class TestGridSearch(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
