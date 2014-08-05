@@ -10,7 +10,8 @@ import lr
 
 class MultiWarpClassifier:
     def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01,
-                 nb_iter=100, lrimpl='sklearn', verbose=False):
+                 nb_iter=100, lrimpl='sklearn', use_pca=False, 
+                 verbose=False):
         assert lrimpl in ['llr', 'sklearn']
         self.feature = feature
         self.mindimdiv = mindimdiv
@@ -18,18 +19,28 @@ class MultiWarpClassifier:
         self.learning_rate = learning_rate
         self.nb_iter = nb_iter
         self.lrimpl = lrimpl
+        self.use_pca = use_pca
         self.verbose = verbose
 
     def train(self, samples, labels):
         # Compute feature maps, performing dimensionality reduction on
         # features while at it.
-        fmaps, self.nbrowfeat, self.nbcolfeat, pca = (
-            feat.warped_fmaps_dimred(
-                samples, self.mindimdiv, self.feature
+        fmaps = None
+        if self.use_pca:
+            fmaps, self.nbrowfeat, self.nbcolfeat, pca = (
+                feat.warped_fmaps_dimred(
+                    samples, self.mindimdiv, self.feature
+                )
             )
-        )
-        self.pca = pca
-        self.featdim = fmaps[0].shape[2]
+            self.pca = pca
+            self.featdim = fmaps[0].shape[2]
+        else:
+            fmaps, self.nbrowfeat, self.nbcolfeat = (
+                feat.warped_fmaps_simple(
+                    samples, self.mindimdiv, self.feature
+                )
+            )
+            self.featdim = self.feature.dimension
         if self.verbose:
             print "Reduced feature dimension to " + repr(self.featdim)
         nb_samples = len(samples)
@@ -85,19 +96,22 @@ class MultiWarpClassifier:
             X[i] = feat.compute_featmap(
                 samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
             ).flatten('C')
-        # Project the test data using PCA.
-        X_ = np.reshape(
-            self.pca.transform(
-                np.reshape(
-                    X, 
-                    [len(samples)*self.nbrowfeat*self.nbcolfeat, 
-                     self.feature.dimension]
-                )
-            ),
-            [len(samples), self.nbrowfeat*self.nbcolfeat*self.featdim]
-        )
+        # Project the test data using PCA (if used for training)
+        if self.use_pca:
+            X_ = np.reshape(
+                self.pca.transform(
+                    np.reshape(
+                        X, 
+                        [len(samples)*self.nbrowfeat*self.nbcolfeat, 
+                         self.feature.dimension]
+                    )
+                ),
+                [len(samples), self.nbrowfeat*self.nbcolfeat*self.featdim]
+            )
         
-        return self.lr.predict_proba(X_)
+            return self.lr.predict_proba(X_)
+        else:
+            return self.lr.predict_proba(X)
 
     def predict(self, samples):
         X = np.empty([
@@ -109,19 +123,20 @@ class MultiWarpClassifier:
             X[i] = feat.compute_featmap(
                 samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
             ).flatten('C')
-        # Project the test data using PCA.
-        X_ = np.reshape(
-            self.pca.transform(
-                np.reshape(
-                    X, 
-                    [len(samples)*self.nbrowfeat*self.nbcolfeat, 
-                     self.feature.dimension]
-                )
-            ),
-            [len(samples), self.nbrowfeat*self.nbcolfeat*self.featdim]
-        )
+        if self.use_pca:
+            # Project the test data using PCA.
+            X = np.reshape(
+                self.pca.transform(
+                    np.reshape(
+                        X, 
+                        [len(samples)*self.nbrowfeat*self.nbcolfeat, 
+                         self.feature.dimension]
+                    )
+                ),
+                [len(samples), self.nbrowfeat*self.nbcolfeat*self.featdim]
+            )
 
-        intlabels = self.lr.predict(X_)
+        intlabels = self.lr.predict(X)
         labels = []
 
         for i in range(len(samples)):

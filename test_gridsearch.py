@@ -3,7 +3,7 @@
 import unittest
 import numpy as np
 
-from warpclassifier import MultiWarpClassifier
+from dpm_classifier import MultiDPMClassifier
 from grid_search import GridSearch
 from ioutils import load_data
 from features import Feature
@@ -49,19 +49,22 @@ class TestGridSearch(unittest.TestCase):
         mindimdiv = [5, 10, 20]
         C = [1, 0.1, 0.01]
         learning_rate = [0.1, 0.01, 0.001]
+        nbparts = [1, 2, 4, 8]
         classifier = GridSearch(
-            lambda args: MultiWarpClassifier(
+            lambda args: MultiDPMClassifier(
+                args['C'],
                 feature,
                 args['mdd'],
-                args['C'],
+                args['nbp'],
                 learning_rate=args['lr'],
-                nb_iter=100,
-                lrimpl='llr',
+                nb_coord_iter=4,
+                nb_gd_iter=25,
                 verbose=True
             ),{
                 'mdd': mindimdiv,
                 'C': C,
-                'lr': learning_rate
+                'lr': learning_rate,
+                'nbp': nbparts
             },
             k=3,
             verbose=True
