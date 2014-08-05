@@ -5,6 +5,7 @@ import numpy as np
 import multiprocessing as mp
 import os
 import cPickle as pickle
+import time
 
 import RemoteException
 
@@ -18,6 +19,7 @@ def _binary_train(label):
         label.
     """
     verbose = _onevall['verbose']
+    starttime = time.time()
     if verbose:
         print "Training for " + repr(label) + "..."
     global _onevall
@@ -45,19 +47,21 @@ def _binary_train(label):
     binclassifier = binclassinit()
     binclassifier.train(positives, negatives)
     
+    endtime = time.time()
+    if verbose:
+        print ("Finished training for " + repr(label) + " in " 
+               + repr(endtime - starttime) + " seconds.")
+
     # Cache if possible.
     if cachedir != None:
         cachefile = open(cachefilename, 'w')
         pickle.dump(binclassifier, cachefile)
         cachefile.close()
 
-    if verbose:
-        print "Finished training for " + repr(label) + "."
-
     return binclassifier
 
 class OneVSAll:
-    def __init__(self, binclassinit, cachedir=None, verbose=False):
+    def __init__(self, binclassinit, cachedir=None, nb_cores=None, verbose=False):
         """ Initializes the one-vs-all classifier given an instance
             of a binary classifier.
         
@@ -74,6 +78,7 @@ class OneVSAll:
         self.binclassinit = binclassinit
         self.cachedir = cachedir
         self.verbose = verbose
+        self.nb_cores = nb_cores
 
     def train(self, samples, labels):
         """ Trains a multi-class classifier from labeled samples. Runs
@@ -85,6 +90,7 @@ class OneVSAll:
             labels     array-like of nb_samples labels corresponding
                        to the samples.
         """
+        starttime = time.time()
         # Passing most of the parameters via global variable to avoid
         # pickling, both for performance (much more efficient copy of
         # training data) and for better interface (binary classifier
@@ -99,7 +105,38 @@ class OneVSAll:
         }
         # Running the training of each binary classifier on a pool of
         # parallel processes.
-        pool = mp.Pool()
-        binmodels = pool.map(_binary_train, set(labels))
+        pool = mp.Pool(processes=self.nb_cores)
+        self.labels_set = list(set(labels))
+        binmodels = pool.map(_binary_train, self.labels_set)
         self.binmodels = binmodels
         _onevall = None
+        endtime = time.time()
+        if self.verbose:
+            print ("Trained " + repr(len(self.labels_set)) + 
+                   " classifiers in " + repr(endtime - starttime) 
+                   + " seconds.")
+
+    def predict_labels(self, samples):
+        """ Predicts labels for test samples.
+
+        Arguments:
+            samples
+                list of sample to classify.
+        
+        Returns:
+            list of corresponding class labels.
+        """
+        # Run each classifier on each sample. Pick the
+        # highest probability for each sample.
+        nb_samples = len(samples)
+        nb_classes = len(self.labels_set)
+        probas = np.empty([nb_samples, nb_classes])
+
+        for j in range(len(self.labels_set)):
+            probas[:,j] = self.binmodels[j].predict_proba(samples)
+        labelidxs = np.argmax(probas, 1)
+        print probas.shape
+        print labelidxs.shape
+        print len(self.labels_set)
+
+        return map(lambda idx: self.labels_set[idx], labelidxs)

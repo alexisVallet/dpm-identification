@@ -1,20 +1,15 @@
-""" Unit tests for one vs all classification.
+""" Unit tests for the GridSearch  class.
 """
 import unittest
 import numpy as np
-import cv2
-import os 
-import errno
-from sklearn.metrics import roc_auc_score, roc_curve
-import matplotlib.pyplot as plt
 
+from dpm_classifier import MultiDPMClassifier
+from grid_search import GridSearch
 from ioutils import load_data
-from onevsall import OneVSAll
 from features import Feature
-from warpclassifier import WarpClassifier
-from dpm_classifier import BinaryDPMClassifier
 
-class TestOneVSAll(unittest.TestCase):
+
+class TestGridSearch(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         print "loading data..."
@@ -36,7 +31,7 @@ class TestOneVSAll(unittest.TestCase):
                 else:
                     cls.traindata[label] += folddata[label]
 
-    def test_onevsall(self):
+    def test_classifier(self):
         """ Tests one vs all classification.
         """
         # Prepare training data.
@@ -51,26 +46,39 @@ class TestOneVSAll(unittest.TestCase):
         # Run training.
         nbbins = (4,4,4)
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
-        mindimdiv = 10
-        C = 0.1
-        nbparts = 4
-        initclassifier = lambda: BinaryDPMClassifier(
-            C,
-            feature,
-            mindimdiv,
-            nbparts,
+        mindimdiv = [5, 10, 20]
+        C = [1, 0.1, 0.01]
+        learning_rate = [0.1, 0.01, 0.001]
+        nbparts = [1, 2, 4, 8]
+        classifier = GridSearch(
+            lambda args: MultiDPMClassifier(
+                args['C'],
+                feature,
+                args['mdd'],
+                args['nbp'],
+                learning_rate=args['lr'],
+                nb_coord_iter=4,
+                nb_gd_iter=25,
+                verbose=True
+            ),{
+                'mdd': mindimdiv,
+                'C': C,
+                'lr': learning_rate,
+                'nbp': nbparts
+            },
+            k=3,
             verbose=True
         )
-        cachedir = 'data/dpmid-cache/onevall_dpm_4parts'
-        if not os.path.isdir(cachedir):
-            os.makedirs(cachedir)
-        onevall = OneVSAll(
-            initclassifier,
-            cachedir=cachedir,
-            nb_cores=1,
-            verbose=True
-        )
-        onevall.train(trainsamples, trainlabels)
+
+        trainsamples = []
+        trainlabels = []
+        
+        for k in self.traindata:
+            for s in self.traindata[k]:
+                trainsamples.append(s)
+                trainlabels.append(k)
+
+        classifier.train(trainsamples, trainlabels)
 
         testsamples = []
         expected = []
@@ -80,7 +88,7 @@ class TestOneVSAll(unittest.TestCase):
                 testsamples.append(s)
                 expected.append(k)
 
-        predicted = onevall.predict_labels(testsamples)
+        predicted = classifier.predict(testsamples)
         print expected
         print predicted
         correct = 0
@@ -90,22 +98,6 @@ class TestOneVSAll(unittest.TestCase):
                 correct += 1
 
         print "Recognition rate: " + repr(float(correct) / len(predicted))
-
-        # Display ROC curves for each individual classifier.
-        for i in range(len(onevall.labels_set)):
-            label = onevall.labels_set[i]
-            classifier = onevall.binmodels[i]
-            expprobas = [1 if k == label else 0 for k in expected]
-            actualprobas = classifier.predict_proba(testsamples)
-            fpr, tpr, threshs = roc_curve(expprobas, actualprobas)
-            auc = roc_auc_score(expprobas, actualprobas)
-            print "model (excluding bias) stats:"
-            print "min proba: " + repr(actualprobas.min())
-            print "max proba: " + repr(actualprobas.max())
-            print "mean proba: " + repr(actualprobas.mean())
-            print "AUC for " + repr(label) + ": " + repr(auc)
-            plt.plot(fpr, tpr)
-            plt.show()
 
 if __name__ == "__main__":
     unittest.main()

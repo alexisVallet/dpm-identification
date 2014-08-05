@@ -1,20 +1,14 @@
-""" Unit tests for one vs all classification.
+""" Unit tests for the MultiWarpClassifier class.
 """
 import unittest
 import numpy as np
-import cv2
-import os 
-import errno
-from sklearn.metrics import roc_auc_score, roc_curve
-import matplotlib.pyplot as plt
 
+from warpclassifier import MultiWarpClassifier
 from ioutils import load_data
-from onevsall import OneVSAll
 from features import Feature
-from warpclassifier import WarpClassifier
-from dpm_classifier import BinaryDPMClassifier
 
-class TestOneVSAll(unittest.TestCase):
+
+class TestMultiWarpClassifier(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         print "loading data..."
@@ -36,7 +30,7 @@ class TestOneVSAll(unittest.TestCase):
                 else:
                     cls.traindata[label] += folddata[label]
 
-    def test_onevsall(self):
+    def test_classifier(self):
         """ Tests one vs all classification.
         """
         # Prepare training data.
@@ -53,24 +47,25 @@ class TestOneVSAll(unittest.TestCase):
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
         C = 0.1
-        nbparts = 4
-        initclassifier = lambda: BinaryDPMClassifier(
-            C,
+        classifier = MultiWarpClassifier(
             feature,
             mindimdiv,
-            nbparts,
+            C,
+            learning_rate=0.01,
+            nb_iter=100,
+            lrimpl='llr',
             verbose=True
         )
-        cachedir = 'data/dpmid-cache/onevall_dpm_4parts'
-        if not os.path.isdir(cachedir):
-            os.makedirs(cachedir)
-        onevall = OneVSAll(
-            initclassifier,
-            cachedir=cachedir,
-            nb_cores=1,
-            verbose=True
-        )
-        onevall.train(trainsamples, trainlabels)
+
+        trainsamples = []
+        trainlabels = []
+        
+        for k in self.traindata:
+            for s in self.traindata[k]:
+                trainsamples.append(s)
+                trainlabels.append(k)
+
+        classifier.train(trainsamples, trainlabels)
 
         testsamples = []
         expected = []
@@ -80,7 +75,7 @@ class TestOneVSAll(unittest.TestCase):
                 testsamples.append(s)
                 expected.append(k)
 
-        predicted = onevall.predict_labels(testsamples)
+        predicted = classifier.predict(testsamples)
         print expected
         print predicted
         correct = 0
@@ -90,22 +85,6 @@ class TestOneVSAll(unittest.TestCase):
                 correct += 1
 
         print "Recognition rate: " + repr(float(correct) / len(predicted))
-
-        # Display ROC curves for each individual classifier.
-        for i in range(len(onevall.labels_set)):
-            label = onevall.labels_set[i]
-            classifier = onevall.binmodels[i]
-            expprobas = [1 if k == label else 0 for k in expected]
-            actualprobas = classifier.predict_proba(testsamples)
-            fpr, tpr, threshs = roc_curve(expprobas, actualprobas)
-            auc = roc_auc_score(expprobas, actualprobas)
-            print "model (excluding bias) stats:"
-            print "min proba: " + repr(actualprobas.min())
-            print "max proba: " + repr(actualprobas.max())
-            print "mean proba: " + repr(actualprobas.mean())
-            print "AUC for " + repr(label) + ": " + repr(auc)
-            plt.plot(fpr, tpr)
-            plt.show()
 
 if __name__ == "__main__":
     unittest.main()

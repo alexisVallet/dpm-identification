@@ -37,14 +37,14 @@ class TestDPMClassifier(unittest.TestCase):
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 10
         C = 0.1
-        nbparts = 2
+        nbparts = 4
         classifier = BinaryDPMClassifier(
             C,
             feature,
             mindimdiv,
             nbparts,
             verbose=True,
-            debug=True
+            debug=False
         )
         label = 'rei_ayanami'
         positives = self.traindata[label]
@@ -80,16 +80,6 @@ class TestDPMClassifier(unittest.TestCase):
         print repr(threshs)
         plt.plot(fpr, tpr)
         plt.show()
-
-        # show which parts are picked up in each test image, from highest
-        # to lowest probability
-        idxs = np.argsort(probas)[::-1]
-        
-        for i in idxs:
-            print "probability: " + repr(probas[i])
-            image = np.array(testsamples[i])
-            cv2.imshow("image", image)
-            cv2.waitKey(0)
 
 if __name__ == "__main__":
     unittest.main()

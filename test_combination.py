@@ -1,18 +1,18 @@
-""" Unit tests for the PartClassifier class.
+""" Unit tests for combination.py
 """
 import unittest
-import cv2
 import numpy as np
-import os
-from sklearn.metrics import roc_curve, roc_auc_score
+import cv2
 import matplotlib.pyplot as plt
-import cPickle as pickle
+from sklearn.metrics import roc_curve, roc_auc_score
 
+from combination import Combination
+from dpm_classifier import BinaryDPMClassifier
+from warpclassifier import WarpClassifier
 from ioutils import load_data
-from partclassifier import BinaryPartClassifier
 from features import Feature
 
-class TestPartClassifier(unittest.TestCase):
+class TestDPMClassifier(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         print "loading data..."
@@ -34,36 +34,36 @@ class TestPartClassifier(unittest.TestCase):
                 else:
                     cls.traindata[label] += folddata[label]
 
-    def test_binary_classifier(self):
+    def test_binary_dpm_combination(self):
         nbbins = (4,4,4)
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
-        mindimdiv = 10
-        classifier = BinaryPartClassifier(
-            0.1,
-            feature,
-            mindimdiv,
-            verbose=True,
-            debug=True,
-            algorithm='ssm'
-        )
-        label = 'asuka_langley'
+        warpmindimdiv = 5
+        C = 0.1
+        nbparts = 2
+        classifier = Combination([
+            WarpClassifier(
+                feature,
+                warpmindimdiv,
+                C,
+                verbose=True
+            ),
+            BinaryDPMClassifier(
+                C,
+                feature,
+                warpmindimdiv * 2,
+                nbparts,
+                verbose=True,
+                debug=False
+            )
+        ])
+            
+        label = 'rei_ayanami'
         positives = self.traindata[label]
         negatives = reduce(lambda l1,l2:l1+l2,
                            [self.traindata[l] for l in self.traindata
                             if l != label])
         print "training..."
         classifier.train(positives, negatives)
-
-        partimage = feature.vis_featmap(classifier.model_featmap)
-        cv2.namedWindow("learned part", cv2.WINDOW_NORMAL)
-        cv2.imshow("learned part", partimage)
-        cv2.waitKey(0)
-
-        print "caching..."
-        cachefile = open('data/dpmid-cache/test', 'w')
-        pickle.dump(classifier, cachefile)
-        cachefile.close()
-
         print "predicting..."
 
         testlabels = []
@@ -85,15 +85,15 @@ class TestPartClassifier(unittest.TestCase):
         plt.plot(fpr, tpr)
         plt.show()
 
-        # show which parts are picked up in each test image, from highest
-        # to lowest probability
-        idxs = np.argsort(probas)[::-1]
-        
-        for i in idxs:
-            print "probability: " + repr(probas[i])
-            image = np.array(testsamples[i])
-            cv2.imshow("image", image)
-            cv2.waitKey(0)
+        for c in classifier.classifiers:
+            probas = c.predict_proba(testsamples)
+            print "computing ROC curve"
+            fpr, tpr, threshs = roc_curve(binlabels, probas)
+            print "auc: " + repr(roc_auc_score(binlabels, probas))
+            print "thresholds:"
+            print repr(threshs)
+            plt.plot(fpr, tpr)
+            plt.show()
 
 if __name__ == "__main__":
     unittest.main()

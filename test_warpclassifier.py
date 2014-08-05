@@ -36,13 +36,16 @@ class TestWarpClassifier(unittest.TestCase):
         nbbins = (4,4,4)
         feature = Feature('bgrhist', np.prod(nbbins), nbbins)
         mindimdiv = 7
-        classifier = WarpClassifier(feature, 7)
+        classifier = WarpClassifier(feature, 7, verbose=True, lrimpl='llr')
         label = 'asuka_langley'
         negatives = reduce(lambda l1,l2:l1+l2,
                            [self.traindata[l] for l in self.traindata
                             if l != label])
         print "training classifier..."
         classifier.train(self.traindata[label], negatives)
+        cv2.namedWindow('learned fmap', cv2.WINDOW_NORMAL)
+        cv2.imshow('learned fmap', feature.vis_featmap(classifier.model_featmap))
+        cv2.waitKey(0)
         print "predicting..."
         labels = []
         testimages = []

@@ -4,7 +4,7 @@
 import numpy as np
 
 def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None, 
-        alpha_0=0.8, alpha_end=10E-5, verbose=False):
+        alpha_0=0.1, alpha_end=10E-5, verbose=False, learning_rate='constant'):
     """ Minimizes a convex non-differentiable function on a set of samples
         using the stochastic subgradient method.
 
@@ -24,7 +24,7 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
                     through the entire dataset.
         nb_batches  number of batches to split the dataset into for 
                     subgradient evaluation. If non specified or None, will
-                    default to batches of size 10. If 1, this essentially
+                    default to batches of size 5. If 1, this essentially
                     becomes the non-stochastic subgradient method.
         alpha_0     initial learning rate.
         alpha_end   learning for the final iteration. The learning rate 
@@ -35,18 +35,23 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
     # Check parameters.
     assert nb_iter >= 1
     if nb_batches == None:
-        nb_batches = max(1, len(samples) // 10)
+        nb_batches = max(1, len(samples) // 5)
     assert 1 <= nb_batches <= len(samples)
-    assert alpha_end <= alpha_0
+    assert learning_rate in ['constant', 'optimal', 'pegasos']
+    if learning_rate == 'optimal':
+        assert alpha_end <= alpha_0
     
     # Initialize stuff.
     model = np.array(init, copy=True)
     denom = (alpha_0 / alpha_end)**(1./(nb_iter - 1))
     alpha = alpha_0
 
+    if verbose:
+        print "Initial cost: " + repr(f(model))
+
     for t in range(1, nb_iter):
-        if verbose:
-            print "Running epoch " + repr(t) + "..."
+        if learning_rate == 'pegasos':
+            alpha = alpha_0 / t
         # Shuffle the dataset.
         shuffledidxs = np.random.permutation(len(samples))
         # Split the dataset into nb_batches roughly equally sized batches.
@@ -66,9 +71,10 @@ def ssm(init, samples, f_subgrad, f=None, nb_iter=50, nb_batches=None,
             # Update the current model using the subgradient.
             model = model - alpha * subgrad
             avgsubgradnorm += np.linalg.norm(subgrad)
-        # Update the learning rate.
-        alpha = alpha / denom
-        if verbose:
+        if learning_rate == 'optimal':
+            # Update the learning rate.
+            alpha = alpha / denom
+        if verbose and t % 10 == 0:
             print (
                 "Average subgradient norm: " 
                 + repr(avgsubgradnorm / nb_batches)
