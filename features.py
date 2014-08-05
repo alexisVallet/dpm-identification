@@ -1,348 +1,161 @@
-""" Features for use in DPMs for character identification.
+""" General utilities for features.
 """
 import cv2
 import numpy as np
-from sklearn.decomposition import PCA
+import theano
 
 class Feature:
-    """ Picklable feature class, encapsulating all the necessary
-        information to build feature maps from an image.
+    """ Abstract feature class specifying the interface for all features
+        to work well with the DPM / Latent LR framework.
     """
-    _featnames = [
-        'labhist', # L*a*b* color histogram
-        'bgrhist',  # BGR color histogram
-        'hog' # HoG features
-    ]
+    def compute_featmap(self, image, n, m):
+        """ Implementing classes should compute a n by m feature map
+            on the source image. Features should be scaled to a
+            "small enough" range (ie. [-1;1] or [0;1]) so the learning
+            algorithms don't run into scaling issues.
+        """
+        raise NotImplemented()
 
-    def __init__(self, featname, dimension, params):
-        self.featname = featname
-        self.dimension = dimension
-        self.params = params
+class BGRHist(Feature):
+    """ Computes flattened and scaled BGR histograms as features.
+    """
+    def __init__(self, nbbins):
+        """ Initializes the feature with a number of bins per channels
+            as a triplet.
+        """
+        self.nbbins = nbbins
 
-    def __call__(self, image):
-        _featfuncs = {
-            'labhist': labhistogram,
-            'bgrhist': bgrhistogram
-        }
-        return _featfuncs[self.featname](self.params)(image)
-
-    def visualize(self, featvector):
-        _visfuncs = {
-            'labhist': labhistvis,
-            'bgrhist': bgrhistvis,
-        }
-        return _visfuncs[self.featname](self.params)(featvector)
-
-    def vis_featmap(self, featmap):
-        return visualize_featmap(
-            featmap,
-            self.visualize,
-            blocksize=(1,1)
+    def compute_featmap(self, image, n, m):
+        """ Compute a feature map of flattened color histograms for each
+            block in the image.
+        """
+        fmap = np.empty(
+            [n, m, np.prod(self.nbbins)],
+            dtype=theano.config.floatX
         )
+        # Limits of color values. Takes the OpenCV convention:
+        # 0-255 for uint8, [0;1] for float32.
+        assert image.dtype in [np.uint8, np.float32]
+        limits = [(0,255)] * 3 if image.dtype == np.uint8 else [(0,1)] * 3
 
-    def __repr__(self):
-        return "%s(%r)" % (self.__class__, self.__dict__)
+        for _block in block_generator(image, n, m):
+            i, j, block = _block
+            fmap[i,j] = colorhistogram(
+                self.nbbins,
+                limits
+            ).flatten('C')
 
-def compute_featmap(image, n, m, feature):
-    height, width = image.shape[0:2]
-    featuremap = np.empty([n, m, feature.dimension])
-    # We cut up the image into an m by n grid. To avoir rounding errors, we
-    # first compute the points of the grid, then iterate over them.
-    rowindexes = np.round(np.linspace(0, height, num=n+1)).astype(np.int32)
-    colindexes = np.round(np.linspace(0, width, num=m+1)).astype(np.int32)
-
-    for i in range(0,n):
-        starti = rowindexes[i]
-        endi = rowindexes[i+1]
-        for j in range(0,m):
-            startj = colindexes[j]
-            endj = colindexes[j+1]
-            block = image[starti:endi,startj:endj]
-            # Compute its feature
-            featuremap[i,j,:] = feature(block)
-    return featuremap
-
-def regular_grid(image, mindimdiv):
-    """ Computes the number of row divisions and column divisions
-        necessary to get blocks that are roughly square, given
-        that the smallest dimension of the image should be divided
-        by mindimdiv.
+class HoG(Feature):
+    """ Computes HoG features, as described by Dalal and Triggs, 2005. Much
+        of the code was inspired by scikit image's HoG implementation.
     """
-    height, width = image.shape[0:2]
-    
-    # Split the image across the smallest dimension. We assume the width is the
-    # the smallest, if that's not the case we transpose it.
-    rotated = min(height,width) == height
-    if rotated:
-        height, width = width, height
+    def __init__(self, nb_orient):
+        self.nb_orient = nb_orient
 
-    # Compute the number of division for the height
-    n = mindimdiv
-    m = int(round(height * n / width))
+    def compute_featmap(self, image, n, m):
+        """ Computes a feature map of flattened HoG features.
+        """
+        assert image.dtype in [np.uint8, np.float32]
+        # Convert image to grayscale, floating point.
+        _image = None
+        if image.dtype != np.float32:
+            _image = image.astype(np.float32) / 255
+        else:
+            _image = image
+        gray = cv2.cvtColor(_image, cv2.COLOR_BGR2GRAY)
+        cv2.imshow('gray', gray)
+        cv2.waitKey(0)
+        # Compute horizontal and vertical gradients.
+        gx = cv2.filter2D(gray, -1, np.array([-1, 0, 1]).reshape((1,3)))
+        gy = cv2.filter2D(gray, -1, np.array([-1, 0, 1]))
+        cv2.imshow('gx', gx)
+        cv2.imshow('gy', gy)
+        cv2.waitKey(0)
+        # Compute unsigned gradient orientation map.
+        orient = np.arctan2(gx, gy) % np.pi
+        cv2.imshow('orient', orient / np.pi)
+        cv2.waitKey(0)
+        # Then compute histograms for each block of this gradient
+        # orientation map.
+        fmap = np.empty([n, m, self.nb_orient])
+        for _block in block_generator(orient, n, m):
+            i, j, block = _block
+            hist = cv2.calcHist(
+                [block],
+                [0],
+                None,
+                [self.nb_orient],
+                (0, np.pi)
+            ).reshape((self.nb_orient,))
+            # Right now we simply normalize linearly to [0;1] range.
+            # The more complex normalizations of true HoG (by block)
+            # could be of interest later on though.
+            fmap[i,j] = hist.astype(np.float32) / hist.max()
+        
+        return fmap
 
-    return [n,m] if rotated else [m,n]
+    def visualize_featmap(self, fmap):
+        assert fmap.shape[2] == self.nb_orient
+        cellsize = 32
+        rows, cols = fmap.shape[0:2]
+        radius = cellsize // 2 - 1
+        hog_image = np.zeros([rows*cellsize, cols*cellsize], np.float32)
+        orientations = np.linspace(0, np.pi, num=self.nb_orient+1)
 
-def compute_regular_featmap(image, feature, mindimdiv):
-    # Compute the features for each layer. A feature is represented as a 3d
-    # numpy array with dimensions w*h*featdim where w and h are the width and
-    # height of the input downsampled image.        
-    # First compute the feature map for the full-resolution layer
-    [n,m] = regular_grid(image, mindimdiv)
+        for i in range(rows):
+            for j in range(cols):
+                for o in range(self.nb_orient):
+                    med_orient = (orientations[o] + orientations[o+1]) / 2
+                    cx, cy = (j*cellsize + cellsize // 2,
+                              i*cellsize + cellsize // 2)
+                    dx = int(radius * np.cos(med_orient))
+                    dy = int(radius * np.sin(med_orient))
+                    cv2.line(hog_image[i*cellsize:(i+1)*cellsize,
+                                       j*cellsize:(j+1)*cellsize],
+                             (cx - dx, cy - dy), (cx + dx, cy + dy),
+                             fmap[i,j,o])
+        return hog_image
 
-    featuremap = compute_featmap(image, n, m, feature)
+def block_generator(image, n, m):
+    """ Returns a generator which iterates over non-overlapping blocks
+        in a n by m grid in the input image. Blocks will be as close to
+        equal sized as possible.
+    """
+    rows, cols = image.shape[0:2]
+    rowidxs = np.round(
+        np.linspace(0, rows, num=n+1)
+    ).astype(np.int32)
+    colidxs = np.round(
+        np.linspace(0, cols, num=m+1)
+    ).astype(np.int32)
 
-    return featuremap
+    for i in range(n):
+        starti = rowidxs[i]
+        endi = rowidxs[i+1]
+        for j in range(m):
+            startj = colidxs[j]
+            endj = colidxs[j+1]
+            yield (i, j, image[starti:endi,startj:endj])
 
 def colorhistogram(image, nbbins=(4,4,4), limits=(0,255,0,255,0,255)):
     """ Compute a color histogram of an image in a numpy array.
     
     Arguments:
         image    color image to compute the color histogram from.
-        nbbins   tuple with nbchannels elements specifying bins to use for each channel.
-                 Defines the shape of the output histogram, for a total of prod(nbbins)
-                 bins.
-        limits   tuple with nbchannels elements specifying bounds for color values for
-                 each channel. Each element is a pair (minval, maxval) where minval
-                 is the lowest possible value (inclusive) and maxval is the highest
-                 possible (exclusive).
+        nbbins   tuple with nbchannels elements specifying bins to use 
+                 for each channel. Defines the shape of the output 
+                 histogram, for a total of prod(nbbins) bins.
+        limits   tuple with nbchannels elements specifying bounds for 
+                 color values for each channel. Each element is a pair 
+                 (minval, maxval) where minval is the lowest possible 
+                 value (inclusive) and maxval is the highest possible 
+                 (exclusive).
 
     Returns:
-        An nbbins shaped numpy array containing the color histogram of the input image.
+        An nbbins shaped numpy array containing the color histogram of 
+        the input image.
     """
     nbchannels = image.shape[2]
     
-    return cv2.calcHist([image], range(0, nbchannels), None, nbbins, limits)
-
-def bgrhistogram(nbbins):
-    def bgrhistogram_(img):
-        hist = colorhistogram(
-            img,
-            nbbins,
-            [0,255,0,255,0,255])
-        return (hist.astype(np.float64) / np.prod(img.shape[0:2])).flatten('C')
-    return bgrhistogram_
-
-def labhistogram(nbbins):
-    """ Computes lab histogram of an image, with each bin normalized to 
-        the [0;1] range, as a feature vector. Curried arguments.
-    
-    Arguments:
-        labimg LAB image to compute the color histogram of. Should be a 
-               float32 LAB image as defined by OpenCV's cvtColor 
-               documentation, i.e. L is between 0 and 100, a and b 
-               between -127 and 127 (all bounds inclusive).
-        nbbins 3-tuple containing the number of bins per channels.
-
-    Returns:
-        A feature vector of size np.prod(nbbins) where each bin is 
-        normalized to the [0;1] range - e.g. each bin contains a 
-        probability of a random pixel in the patch belonging to the bin 
-        (so it all sums to 1).
-    """
-    return (lambda img: (
-        colorhistogram(
-            img, 
-            nbbins, 
-            [0,101,-127, 128, -127, 128]).astype(np.float64)
-        / np.prod(img.shape[0:2])).flatten('C'))
-
-def np_labhistogram(nbbins):
-    return (lambda img: (
-        np.histogramdd(
-            img.reshape([img.shape[0] * img.shape[1], 3], order='C'),
-            nbbins,
-            [(0,100), (-127, 127), (-127, 127)])[0].astype(np.float64)
-        / np.prod(img.shape[0:2])).flatten('C'))
-
-def histvis(bounds, hist_):
-    # As the histogram may be the result of (L)SVM training, individual
-    # values may be negative. A negative feature is a feature that
-    # contributes more to the other characters than the one we're
-    # interested in, so we drop it. We then take the square of each
-    # feature.
-    hist = hist_.copy()
-    hist[hist < 0] = 0
-    hist = np.multiply(hist, hist)
-    lbins, abins, bbins = hist.shape
-    lbounds, abounds, bbounds = bounds
-    # precompute lower and higher bounds for each bin
-    lvals, avals, bvals = map(
-        lambda ((low,high),bins): np.linspace(low, high, bins+1),
-        zip([lbounds, abounds, bbounds], [lbins, abins, bbins])
-    )
-
-    featcolor = np.zeros([3], np.float32)
-    sumbins = 0.
-    
-    for li in range(0,lbins):
-        medl = (lvals[li] + lvals[li+1])/2
-        for ai in range(0, abins):
-            meda = (avals[ai] + avals[ai+1])/2
-            for bi in range(0, bbins):
-                # ignore negative coefficients
-                medb = (bvals[bi] + bvals[bi+1])/2
-                bincolor = np.array([medl, meda, medb], np.float32)
-                featcolor = featcolor + (hist[li,ai,bi] * bincolor)
-                sumbins += hist[li,ai,bi]
-
-    if sumbins != 0:
-        featcolor /= sumbins
-
-    # return a single pixel image (will be resized by the vizualisation
-    # procedure for a full feature map)
-    return featcolor.reshape([1,1,3])
-
-def labhistvis(nbbins):
-    return lambda vhist: histvis(
-        [(0,100), (-127, 127), (-127, 127)],
-        vhist.reshape(nbbins, order='C'))
-
-def bgrhistvis(nbbins):
-    return lambda vhist: histvis(
-        [(0,1), (0,1), (0,1)],
-        vhist.reshape(nbbins, order='C'))
-
-def visualize_featmap(featuremap, featvis, blocksize=(32,32), 
-                       dtype=np.float32):
-    """ Returns a visualization for a feature map as a color image,
-        given a feature visualization function to apply to each feature.
-    """
-    brows, bcols = blocksize
-    ftrows, ftcols = featuremap.shape[0:2]
-    outimage = np.empty([ftrows*brows, ftcols*bcols, 3], dtype=dtype)
-
-    for i in range(0,ftrows):
-        for j in range(0,ftcols):
-            outimage[i*brows:(i+1)*brows,
-                     j*brows:(j+1)*brows] = (
-                         cv2.resize(
-                             featvis(featuremap[i,j]),
-                             blocksize[::-1],
-                             interpolation=cv2.INTER_NEAREST
-                         )
-                     )
-    
-    return outimage
-
-def max_energy_subwindow(featmap, winsize):
-    """ Compute and return the highest energy subwindow of a given
-        square size in a feature map.
-
-    Arguments:
-        featmap    feature map to compute the highest energy subwindow
-                   of.
-        winsize    size of the window, i.e. the window will have size
-                   winsize columns by winsize rows.
-    Returns:
-        (maxsubwin, maxanchor) where maxsubwin is the subwindow of
-        maximum energy in the feature map, and maxanchor is the position
-        of the top-left of the window in the original feature map.
-    """
-    wrows, wcols, featdim = featmap.shape
-    maxanchor = None
-    maxsubwin = None
-    maxenergy = 0
-    
-    for i in range(wrows - winsize):
-        for j in range(wcols - winsize):
-            subwin = featmap[i:i+winsize,j:j+winsize]
-            energy = np.vdot(subwin, subwin)
-            if maxsubwin == None or maxenergy < energy:
-                maxanchor = (i,j)
-                maxenergy = energy
-                maxsubwin = subwin
-    
-    return (np.array(maxsubwin, copy=True), maxanchor)
-
-def warped_fmaps_dimred(samples, mindimdiv, feature, min_var=0.9):
-    """ Compute warped feature maps for a set of samples, applying
-        PCA to the features as a preprocessing step to the features.
-        Returns the corresponding sklearn PCA object, so further
-        data can easily be projected to the new subspace.
-    """
-    nb_samples = len(samples)
-    # Compute all the features.
-    fmaps, rows, cols = warped_fmaps_simple(samples, mindimdiv, feature)
-    # Slap them into a data matrix.
-    X = np.empty([nb_samples * rows * cols, feature.dimension])
-    for i in range(nb_samples):
-        X[i*rows*cols:(i+1)*rows*cols] = np.reshape(
-            fmaps[i], [rows * cols, feature.dimension]
-        )
-    # Run PCA on it.
-    pca = PCA(min_var)
-    X_ = pca.fit_transform(X)
-    new_featdim = X_.shape[1]
-    # Slap them into feature maps.
-    fmaps_dimred = []
-
-    for i in range(nb_samples):
-        fmaps_dimred.append(
-            np.reshape(
-                X_[i*rows*cols:(i+1)*rows*cols],
-                [rows, cols, new_featdim]
-            )
-        )
-    return (fmaps_dimred, rows, cols, pca)
-
-def warped_fmaps_simple(samples, mindimdiv, feature):
-    # Find out the average aspect ratio across
-    # positive samples. Use that value to define
-    # the feature map dimensions.
-    meanar = np.mean(map(lambda s: float(s.shape[1]) / s.shape[0],
-                         samples))
-    # Basic algebra to get the corresponding number of rows/cols
-    # from the desired minimum dimension divisions.
-    nbrowfeat = None
-    nbcolfeat = None
-
-    if meanar > 1:
-        nbrowfeat = mindimdiv
-        nbcolfeat = mindimdiv * meanar
-    else:
-        nbrowfeat = int(mindimdiv / meanar)
-        nbcolfeat = mindimdiv
-    
-    tofeatmap = lambda s: compute_featmap(s, nbrowfeat, nbcolfeat, feature)
-    return (map(tofeatmap, samples), nbrowfeat, nbcolfeat)
-
-def warped_fmaps(positives, negatives, mindimdiv, feature):
-    """ Computes feature maps warped to the mean positive aspect ratio.
-
-    Arguments:
-        positives
-            list of positive image samples.
-        negatives
-            list of negative image samples.
-        mindimdiv
-            number of division for the minimum dimension of the feature
-            maps.
-    Returns:
-       (posmaps, negmaps, nbrowfeat, nbcolfeat) where posmaps and negmaps
-       are feature maps for positive and negative samples respectively,
-       and [nbrowfeat, nbcolfeat] are the first 2 dimensions of the feature
-       maps (the third is the feature dimension).
-    """
-    # Find out the average aspect ratio across
-    # positive samples. Use that value to define
-    # the feature map dimensions.
-    meanar = np.mean(map(lambda pos: float(pos.shape[1]) / pos.shape[0],
-                         positives))
-    # Basic algebra to get the corresponding number of rows/cols
-    # from the desired minimum dimension divisions.
-    nbrowfeat = None
-    nbcolfeat = None
-
-    if meanar > 1:
-        nbrowfeat = mindimdiv
-        nbcolfeat = mindimdiv * meanar
-    else:
-        nbrowfeat = int(mindimdiv / meanar)
-        nbcolfeat = mindimdiv
-    
-    tofeatmap = lambda pos: compute_featmap(pos, nbrowfeat, nbcolfeat, feature)
-    posmaps = map(tofeatmap, positives)
-    negmaps = map(tofeatmap, negatives)
-    
-    return (posmaps, negmaps, nbrowfeat, nbcolfeat)
-
+    return cv2.calcHist([image], range(0, nbchannels), None, nbbins, 
+                        limits)
