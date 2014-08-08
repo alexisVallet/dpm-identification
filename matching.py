@@ -22,6 +22,12 @@ def match_filter(fmap, linfilter):
         to the response of the filter when its center is positioned on
         this pixel.
     """
+    if fmap.shape[2] > 512:
+        raise ValueError("""
+Cannot compute cross-correlation for feature dimension greater than 512.
+This is a limitation in OpenCV. The future switch to GPU backend for cross
+correlations should hopefully fix this bug.
+        """)
     fmap_ = fmap.astype(np.float32)
     linfilter_ = linfilter.astype(np.float32)
     # Run cross correlation of the filter on the map.

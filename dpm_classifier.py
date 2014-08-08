@@ -8,7 +8,7 @@ from matching import match_part
 from dpm import DPM, vectortodpm
 from warpclassifier import MultiWarpClassifier
 from latent_mlr import LatentMLR
-from features import max_energy_subwindow, compute_featmap, warped_fmaps_simple
+from features import max_energy_subwindow, warped_fmaps_simple
 
 def _init_dpm(warpmap, nbparts, partsize):
     """ Initializes a DPM by greedily taking high energy subwindows
@@ -16,11 +16,11 @@ def _init_dpm(warpmap, nbparts, partsize):
     """
     initparts = []
     initanchors = []
-    # Initialize deformation to 0.1 times the square leading dimension.
+    # Initialize deformation to 0.01 times the square leading dimension.
     # This is to counteract to some extent the effect of feature scaling
     # on displacements.
     leading_dim = max(warpmap.shape[0], warpmap.shape[1])**2
-    initdeforms = [leading_dim * np.array([0,0,0.1,0.1])] * nbparts
+    initdeforms = [leading_dim * np.array([0,0,0.01,0.01])] * nbparts
     warpcopy = np.array(warpmap, copy=True)
     
     for i in range(nbparts):
@@ -112,6 +112,16 @@ def _best_match_wrapper(modelvector, featmap, args):
 
     return latvec
 
+def _best_matches(beta, fmaps, labels, args):
+    nb_features, nb_classes = beta.shape
+    nb_samples = len(fmaps)
+    latents = np.empty([nb_samples, nb_features],
+    dtype=theano.config.floatX)
+    for i in range(nb_samples):
+        latvec = _best_match_wrapper(beta[:,labels[i]], fmaps[i], args)
+        latents[i] = latvec
+    return latents
+
 class MultiDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial
         logistic regression.
@@ -134,8 +144,8 @@ class MultiDPMClassifier:
             self.feature,
             self.mindimdiv,
             C=self.C,
-            lrimpl='llr',
-            verbose = self.verbose
+            learning_rate=self.learning_rate,
+            verbose=self.verbose
         )
         warp.train(samples, labels)
         warpmaps = warp.model_featmaps
@@ -191,25 +201,30 @@ class MultiDPMClassifier:
             verbose=self.verbose
         )
         self.lmlr.fit(samples, y)
+        # Save the DPMs for visualization purposes.
+        self.dpms = []
+
+        for i in range(self.lmlr.coef_.shape[1]):
+            self.dpms.append(
+                vectortodpm(self.lmlr.coef_[:,i], dpmsize)
+            )
        
     def predict_proba(self, samples):
         # Convert images to feature maps.
-        fmaps = map(lambda s: compute_featmap(
+        fmaps = map(lambda s: self.feature.compute_featmap(
             s, 
             self.nbrowfeat, 
-            self.nbcolfeat, 
-            self.feature
+            self.nbcolfeat
         ), samples)
 
         return self.lmlr.predict_proba(fmaps)
 
     def predict(self, samples):
         # Convert images to feature maps.
-        fmaps = map(lambda s: compute_featmap(
+        fmaps = map(lambda s: self.feature.compute_featmap(
             s, 
             self.nbrowfeat, 
-            self.nbcolfeat, 
-            self.feature
+            self.nbcolfeat
         ), samples)
         intlabels = self.lmlr.predict(fmaps)
         labels = []

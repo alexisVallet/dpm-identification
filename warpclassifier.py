@@ -4,21 +4,17 @@ from sklearn.linear_model import LogisticRegression, SGDClassifier
 import numpy as np
 
 import features as feat
-from latent_lr import BinaryLR
 from latent_mlr import MLR
 import lr
 
 class MultiWarpClassifier:
     def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01,
-                 nb_iter=100, lrimpl='sklearn', use_pca=False, 
-                 verbose=False):
-        assert lrimpl in ['llr', 'sklearn']
+                 nb_iter=100, use_pca=False, verbose=False):
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.C = C
         self.learning_rate = learning_rate
         self.nb_iter = nb_iter
-        self.lrimpl = lrimpl
         self.use_pca = use_pca
         self.verbose = verbose
 
@@ -34,6 +30,8 @@ class MultiWarpClassifier:
             )
             self.pca = pca
             self.featdim = fmaps[0].shape[2]
+            if self.verbose:
+                print "Reduced feature dimension to " + repr(self.featdim)
         else:
             fmaps, self.nbrowfeat, self.nbcolfeat = (
                 feat.warped_fmaps_simple(
@@ -41,8 +39,6 @@ class MultiWarpClassifier:
                 )
             )
             self.featdim = self.feature.dimension
-        if self.verbose:
-            print "Reduced feature dimension to " + repr(self.featdim)
         nb_samples = len(samples)
         nb_features = self.nbrowfeat * self.nbcolfeat * self.featdim
         self.labels_set = list(set(labels))
@@ -56,23 +52,18 @@ class MultiWarpClassifier:
         
         # Compute feature maps and int labels.
         for i in range(nb_samples):
-            X[i] = fmaps[i].flatten('C')
+            fmap = fmaps[i]
+            X[i] = fmap.flatten('C')
             y[i] = label_to_int[labels[i]]
 
 
-        if self.lrimpl == 'llr':
-            self.lr = MLR(
-                self.C,
-                nb_iter=self.nb_iter,
-                learning_rate=self.learning_rate,
-                verbose=self.verbose
-            )
-            self.lr.fit(X, y)
-        elif self.lrimpl == 'sklearn':
-            self.lr = LogisticRegression(
-                C=self.C
-            )
-            self.lr.fit(X, y)
+        self.lr = MLR(
+            self.C,
+            nb_iter=self.nb_iter,
+            learning_rate=self.learning_rate,
+            verbose=self.verbose
+        )
+        self.lr.fit(X, y)
 
         # Store the learned "feature map" for each class in its proper 
         # shape, projected back into to the original space.
@@ -93,8 +84,8 @@ class MultiWarpClassifier:
         ])
 
         for i in range(len(samples)):
-            X[i] = feat.compute_featmap(
-                samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
+            X[i] = self.feature.compute_featmap(
+                samples[i], self.nbrowfeat, self.nbcolfeat
             ).flatten('C')
         # Project the test data using PCA (if used for training)
         if self.use_pca:
@@ -120,8 +111,8 @@ class MultiWarpClassifier:
         ])
 
         for i in range(len(samples)):
-            X[i] = feat.compute_featmap(
-                samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
+            X[i] = self.feature.compute_featmap(
+                samples[i], self.nbrowfeat, self.nbcolfeat
             ).flatten('C')
         if self.use_pca:
             # Project the test data using PCA.

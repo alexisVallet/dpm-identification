@@ -5,8 +5,7 @@ import numpy as np
 
 from warpclassifier import MultiWarpClassifier
 from ioutils import load_data
-from features import Feature
-
+from features import Combine, BGRHist, HoG
 
 class TestMultiWarpClassifier(unittest.TestCase):
     @classmethod
@@ -44,7 +43,10 @@ class TestMultiWarpClassifier(unittest.TestCase):
         
         # Run training.
         nbbins = (4,4,4)
-        feature = Feature('bgrhist', np.prod(nbbins), nbbins)
+        feature = Combine(
+            HoG(5, 1),
+            BGRHist(nbbins, 1)
+        )
         mindimdiv = 10
         C = 0.1
         classifier = MultiWarpClassifier(
@@ -53,7 +55,6 @@ class TestMultiWarpClassifier(unittest.TestCase):
             C,
             learning_rate=0.01,
             nb_iter=100,
-            lrimpl='llr',
             verbose=True
         )
 

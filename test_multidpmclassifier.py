@@ -6,7 +6,7 @@ import os.path
 
 from dpm_classifier import MultiDPMClassifier
 from ioutils import load_data
-from features import Feature
+from features import Combine, BGRHist, HoG
 
 class TestDPMClassifier(unittest.TestCase):
     @classmethod
@@ -32,7 +32,10 @@ class TestDPMClassifier(unittest.TestCase):
 
     def test_binary_dpm_classifier(self):
         nbbins = (4,4,4)
-        feature = Feature('bgrhist', np.prod(nbbins), nbbins)
+        feature = Combine(
+            BGRHist(nbbins, 0),
+            HoG(9,1)
+        )
         mindimdiv = 10
         C = 0.1
         nbparts = 4
@@ -42,8 +45,8 @@ class TestDPMClassifier(unittest.TestCase):
             mindimdiv,
             nbparts,
             nb_coord_iter=4,
-            nb_gd_iter=50,
-            learning_rate=0.01,
+            nb_gd_iter=25,
+            learning_rate=0.001,
             verbose=True
         )
 
@@ -66,6 +69,11 @@ class TestDPMClassifier(unittest.TestCase):
             cachefile = open(cachename, 'w')
             pickle.dump(classifier, cachefile)
             cachefile.close()
+
+        print "Deformation coeffs:"
+        for dpm in classifier.dpms:
+            print dpm.deforms
+
         print "Prediction..."
 
         testsamples = []
