@@ -4,9 +4,10 @@ import unittest
 import numpy as np
 
 from dpm_classifier import MultiDPMClassifier
+from warpclassifier import MultiWarpClassifier
 from grid_search import GridSearch
 from ioutils import load_data
-from features import Feature
+from features import Combine, BGRHist, HoG
 
 class TestGridSearch(unittest.TestCase):
     @classmethod
@@ -44,26 +45,20 @@ class TestGridSearch(unittest.TestCase):
         
         # Run training.
         nbbins = (4,4,4)
-        feature = Feature('bgrhist', np.prod(nbbins), nbbins)
-        mindimdiv = [5, 10, 20]
-        C = [1, 0.1, 0.01]
-        learning_rate = [0.1, 0.01, 0.001]
-        nbparts = [1, 2, 4, 8]
+        feature = HoG(9,1)
+        mindimdiv = [5, 10, 15, 20, 25, 30]
+        C = [0.1]
+        learning_rate = [0.001]
         classifier = GridSearch(
-            lambda args: MultiDPMClassifier(
-                args['C'],
+            lambda args: MultiWarpClassifier(
                 feature,
                 args['mdd'],
-                args['nbp'],
-                learning_rate=args['lr'],
-                nb_coord_iter=4,
-                nb_gd_iter=25,
-                verbose=True
+                args['C'],
+                args['lr']
             ),{
                 'mdd': mindimdiv,
                 'C': C,
-                'lr': learning_rate,
-                'nbp': nbparts
+                'lr': learning_rate
             },
             k=3,
             verbose=True

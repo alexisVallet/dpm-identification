@@ -16,11 +16,7 @@ def _init_dpm(warpmap, nbparts, partsize):
     """
     initparts = []
     initanchors = []
-    # Initialize deformation to 0.01 times the square leading dimension.
-    # This is to counteract to some extent the effect of feature scaling
-    # on displacements.
-    leading_dim = max(warpmap.shape[0], warpmap.shape[1])**2
-    initdeforms = [leading_dim * np.array([0,0,0.01,0.01])] * nbparts
+    initdeforms = [np.array([0,0,0.01,0.01])] * nbparts
     warpcopy = np.array(warpmap, copy=True)
     
     for i in range(nbparts):
@@ -35,7 +31,7 @@ def _init_dpm(warpmap, nbparts, partsize):
         warpcopy[ai:ai+partsize,aj:aj+partsize] = 0
     return DPM(initparts, initanchors, initdeforms)
 
-def _best_match(dpm, featmap, debug=False):
+def _best_match(dpm, featmap, deform_factor, debug=False):
     """ Computes the best matching subwindows and corresponding
         displacements of a root less deformable parts model on a
         feature map.
@@ -56,27 +52,24 @@ def _best_match(dpm, featmap, debug=False):
     """
     winsanddisp = map(
         lambda i: match_part(
-            featmap, 
+            featmap,
             dpm.parts[i], 
             dpm.anchors[i],
             dpm.deforms[i],
+            deform_factor,
             debug
         ),
         range(len(dpm.parts))
     )
     subwins = [res[0] for res in winsanddisp]
     displacements = [res[1:3] for res in winsanddisp]
-
-    # Scale displacements linearly to the [-1;1] range to keep them
-    # at a scale comparable to subwindows. The squared displacements are 
-    # limited to a range of leading_fmap_dim^2 in value. We'll
-    # assume that all feature maps are warped to the same dimension.
-    leading_dim = max(featmap.shape[0], featmap.shape[1])**2
     scaled_disp = []
 
     for i in range(len(dpm.parts)):
         di, dj = displacements[i]
-        scaled_disp.append((float(di) / leading_dim, float(dj) / leading_dim))
+        scaled_disp.append(
+            (float(di) * deform_factor, float(dj) * deform_factor)
+        )
 
     return (subwins, scaled_disp)
 
@@ -84,12 +77,14 @@ def _best_match_wrapper(modelvector, featmap, args):
     """ Wrapper to _best_match to convert everything into the proper
         vector format.
     """
-    modelsize = args
+    modelsize = args['size']
+    deform_factor = args['df']
 
     # Compute the best match on the converted model data structure.
     (subwins, displacements) = _best_match(
         vectortodpm(modelvector, modelsize),
-        featmap
+        featmap,
+        deform_factor
     )
 
     # Put the computed latent values into a proper latent vector.
@@ -103,9 +98,6 @@ def _best_match_wrapper(modelvector, featmap, args):
     # Introduce the part displacements.
     for disp in displacements:
         di, dj = disp
-        if abs(di) > 30 or abs(dj) > 30:
-            print "Invalid displacements: "
-            print (di, dj)
         latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
         offset = offset+4
     assert offset == modelvector.size
@@ -126,12 +118,14 @@ class MultiDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial
         logistic regression.
     """
-    def __init__(self, C, feature, mindimdiv, nbparts, nb_coord_iter=4,
-                 nb_gd_iter=25, learning_rate=0.01, verbose=False):
+    def __init__(self, C, feature, mindimdiv, nbparts, deform_factor,
+                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.01, 
+                 verbose=False):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.nbparts = nbparts
+        self.deform_factor = deform_factor
         self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
@@ -190,10 +184,19 @@ class MultiDPMClassifier:
         for i in range(nb_classes):
             initmodel[:,i] = initdpms[i].tovector()
 
+        # Set the deformation factor to the user supplied value, scaled
+        # by 1 over the square leading feature map dimension to avoid
+        # feature scaling issues in the gradient descent.
+        square_lead_dim = np.max(fmaps[0].shape[0:2])**2
+        args = {
+            'size': dpmsize,
+            'df': float(self.deform_factor) / square_lead_dim
+        }
+
         self.lmlr = LatentMLR(
             self.C,
             _best_matches,
-            dpmsize,
+            args,
             initmodel,
             nb_coord_iter=self.nb_coord_iter,
             nb_gd_iter=self.nb_gd_iter,

@@ -39,7 +39,8 @@ correlations should hopefully fix this bug.
 
     return response
 
-def match_part(fmap, partfilter, anchor, deform, debug=False):
+def match_part(fmap, partfilter, anchor, deform, 
+               deform_factor, debug=False):
     """ Matches a DPM part against a feature map.
     
     Arguments:
@@ -70,11 +71,12 @@ def match_part(fmap, partfilter, anchor, deform, debug=False):
         cv2.namedWindow('response', cv2.WINDOW_NORMAL)
         cv2.imshow('response', (response - respmin) / (respmax - respmin))
         cv2.waitKey(0)
-    # Run GDT to compute score taking deformations into account and optimal
-    # displacement. GDT expects deformation costs in dx, dy, dx^2, dy^2
-    # format so we switch things around in deform accordingly.
+    # Run GDT to compute score taking deformations into account and 
+    # optimal displacement. GDT expects deformation costs in dx, dy, 
+    # dx^2, dy^2 format so we switch things around in deform accordingly.
     dy, dx, dy2, dx2 = deform
-    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), response)
+    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), response,
+                     scaling=deform_factor)
     if debug:
         respmin = df.min()
         respmax = df.max()

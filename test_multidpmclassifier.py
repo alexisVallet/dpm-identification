@@ -39,11 +39,13 @@ class TestDPMClassifier(unittest.TestCase):
         mindimdiv = 10
         C = 0.1
         nbparts = 4
+        deform_factor = 0.001
         classifier = MultiDPMClassifier(
             C,
             feature,
             mindimdiv,
             nbparts,
+            deform_factor,
             nb_coord_iter=4,
             nb_gd_iter=25,
             learning_rate=0.001,
@@ -59,16 +61,7 @@ class TestDPMClassifier(unittest.TestCase):
                 trainlabels.append(k)
 
         print "Training..."
-        cachename = 'data/dpmid-cache/test_lmlr_dpm_50'
-        if os.path.isfile(cachename):
-            cachefile = open(cachename)
-            classifier = pickle.load(cachefile)
-            cachefile.close()
-        else:
-            classifier.train(trainsamples, trainlabels)
-            cachefile = open(cachename, 'w')
-            pickle.dump(classifier, cachefile)
-            cachefile.close()
+        classifier.train(trainsamples, trainlabels)
 
         print "Deformation coeffs:"
         for dpm in classifier.dpms:

@@ -51,7 +51,7 @@ def gdt2D_py(d, f, rg=None):
     return (outdf.T, arg2)
     
 
-def gdt2D(d, f, rg=None):
+def gdt2D(d, f, rg=None, scaling=1.):
     """ Computes the generalized distance transform of a function on a 2D
         grid, with quadratic distance measure.
     
@@ -67,13 +67,21 @@ def gdt2D(d, f, rg=None):
         - df(p) = min_q(f(q) + d(p - q))
         - args(p) = argmin_q(f(q) + d(p - q))
     """
+    # Introduce deformation scaling into the distance function to avoid
+    # having to touch the C code.
+    cx, cy, cx2, cy2 = d
+    d_ = np.array(
+        [scaling * cx, scaling * cy, 
+         scaling**2 * cx2, scaling**2 * cy2],
+        dtype=np.float32
+    )
     rows, cols = f.shape
     if rg==None:
         rg = max(rows,cols)
     df = np.empty(f.shape, dtype=np.float32)
     argi = np.empty([rows,cols,1], dtype=np.int32)
     argj = np.empty([rows,cols,1], dtype=np.int32)
-    cgdt2D(d.astype(np.float32), f.astype(np.float32), rows, cols,
+    cgdt2D(d_.astype(np.float32), f.astype(np.float32), rows, cols,
            df, argi, argj, rg)
 
     return (df, np.concatenate((argi,argj), axis=2))
