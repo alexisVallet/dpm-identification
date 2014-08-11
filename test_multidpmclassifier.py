@@ -39,7 +39,7 @@ class TestDPMClassifier(unittest.TestCase):
         mindimdiv = 10
         C = 0.1
         nbparts = 4
-        deform_factor = 0.001
+        deform_factor = 1.
         classifier = MultiDPMClassifier(
             C,
             feature,
