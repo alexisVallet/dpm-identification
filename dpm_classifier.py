@@ -6,9 +6,10 @@ import theano
 
 from matching import match_part
 from dpm import DPM, vectortodpm
-from warpclassifier import MultiWarpClassifier
+from warpclassifier import WarpClassifier
 from latent_mlr import LatentMLR
 from features import max_energy_subwindow, warped_fmaps_simple
+from grid_search import GridSearchMixin
 
 def _init_dpm(warpmap, nbparts, partsize):
     """ Initializes a DPM by greedily taking high energy subwindows
@@ -114,11 +115,11 @@ def _best_matches(beta, fmaps, labels, args):
         latents[i] = latvec
     return latents
 
-class MultiDPMClassifier:
+class BaseDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial
         logistic regression.
     """
-    def __init__(self, C, feature, mindimdiv, nbparts, deform_factor,
+    def __init__(self, C, feature, mindimdiv, nbparts, deform_factor=1.,
                  nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.01, 
                  verbose=False):
         self.C = C
@@ -134,7 +135,7 @@ class MultiDPMClassifier:
     def train(self, samples, labels):
         # Initialize the model with a warping classifier, taking
         # high energy subwindows as parts.
-        warp = MultiWarpClassifier(
+        warp = WarpClassifier(
             self.feature,
             self.mindimdiv,
             C=self.C,
@@ -159,21 +160,6 @@ class MultiDPMClassifier:
         )
         nb_samples = len(samples)
         nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
-        
-        # Put labels in 0..k-1 range.
-        self.labels_set = list(set(labels))
-        label_to_int = {}
-
-        for i in range(len(self.labels_set)):
-            label_to_int[self.labels_set[i]] = i
-
-        y = np.empty([nb_samples], dtype=np.int32)
-        
-        for i in range(nb_samples):
-            y[i] = label_to_int[labels[i]]
-
-        # Combine feature map and label in the samples.
-        samples = fmaps
 
         # Train the DPMs using latent MLR
         dpmsize = initdpms[0].size() # All DPMs should have the same size.
@@ -203,7 +189,7 @@ class MultiDPMClassifier:
             learning_rate=self.learning_rate,
             verbose=self.verbose
         )
-        self.lmlr.fit(samples, y)
+        self.lmlr.train(fmaps, labels)
         # Save the DPMs for visualization purposes.
         self.dpms = []
 
@@ -229,10 +215,8 @@ class MultiDPMClassifier:
             self.nbrowfeat, 
             self.nbcolfeat
         ), samples)
-        intlabels = self.lmlr.predict(fmaps)
-        labels = []
 
-        for i in range(len(samples)):
-            labels.append(self.labels_set[intlabels[i]])
+        return self.lmlr.predict(fmaps)
 
-        return labels
+class DPMClassifier(BaseDPMClassifier, GridSearchMixin):
+    pass

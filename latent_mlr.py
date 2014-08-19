@@ -3,8 +3,12 @@
 import numpy as np
 import theano
 import theano.tensor as T
+from grid_search import GridSearchMixin
 
-class LatentMLR:
+def compile_funcs():
+    """ Compiles and returns theano functions. """
+
+class BaseLatentMLR:
     def __init__(self, C, latent_function, latent_args, initbeta,
                  nb_coord_iter=1, nb_gd_iter=100, learning_rate=0.01,
                  verbose=False):
@@ -84,7 +88,7 @@ class LatentMLR:
             T.argmax(predict_proba_sym, axis=1)
         )
 
-    def fit(self, samples, labels):
+    def train(self, samples, labels):
         # Check parameters.
         assert labels.size == len(samples)
         for i in range(labels.size):
@@ -234,22 +238,25 @@ class LatentMLR:
 
         return self._predict_label(test_latents)
 
+class LatentMLR(BaseLatentMLR, GridSearchMixin):
+    pass
+
 def _dummy_latent(beta, samples, labels, args):
     return np.vstack(samples)
 
-class MLR:
+class BaseMLR:
     """ Implementation of non-latent multinomial logistic regression based
-        on latent MLR, for testing purposes.
+        on latent MLR.
     """
-    def __init__(self, C, nb_iter=100, learning_rate=0.01, verbose=False):
+    def __init__(self, C=0.1, nb_iter=100, learning_rate=0.001, verbose=False):
         self.C = C
         self.nb_iter = nb_iter
         self.learning_rate = learning_rate
         self.verbose = verbose
         
-    def fit(self, X, y):
-        nb_samples, nb_features = X.shape
-        nb_classes = np.unique(y).size
+    def train(self, samples, labels):
+        nb_features = samples[0].size
+        nb_classes = np.unique(labels).size
         
         self.lmlr = LatentMLR(self.C, _dummy_latent, None,
                               np.zeros(
@@ -260,26 +267,15 @@ class MLR:
                               nb_gd_iter=self.nb_iter, 
                               learning_rate=self.learning_rate,
                               verbose=self.verbose)
-        samples = []
-
-        for i in range(nb_samples):
-            samples.append(X[i].astype(theano.config.floatX))
-        self.lmlr.fit(samples, y)
+        self.lmlr.train(samples, labels)
         self.intercept_ = self.lmlr.intercept_
         self.coef_ = self.lmlr.coef_
 
-    def predict_proba(self, X):
-        samples = []
-
-        for i in range(X.shape[0]):
-            samples.append(X[i])
-        
+    def predict_proba(self, samples):        
         return self.lmlr.predict_proba(samples)
 
-    def predict(self, X):
-        samples = []
-
-        for i in range(X.shape[0]):
-            samples.append(X[i])
-        
+    def predict(self, samples):
         return self.lmlr.predict(samples)
+
+class MLR(BaseMLR, GridSearchMixin):
+    pass

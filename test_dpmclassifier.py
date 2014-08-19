@@ -1,13 +1,14 @@
-""" Unit tests for the MultiWarpClassifier class.
-"""
 import unittest
 import numpy as np
+import cv2
+import cPickle as pickle
+import os.path
 
-from warpclassifier import MultiWarpClassifier
+from dpm_classifier import DPMClassifier
 from ioutils import load_data
 from features import Combine, BGRHist, HoG
 
-class TestMultiWarpClassifier(unittest.TestCase):
+class TestDPMClassifier(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         print "loading data..."
@@ -29,44 +30,44 @@ class TestMultiWarpClassifier(unittest.TestCase):
                 else:
                     cls.traindata[label] += folddata[label]
 
-    def test_classifier(self):
-        """ Tests one vs all classification.
-        """
-        # Prepare training data.
-        trainsamples = []
-        trainlabels = []
-        
-        for l in self.traindata:
-            for s in self.traindata[l]:
-                trainsamples.append(s)
-                trainlabels.append(l)
-        
-        # Run training.
+    def test_binary_dpm_classifier(self):
         nbbins = (4,4,4)
         feature = Combine(
-            HoG(5, 1),
-            BGRHist(nbbins, 1)
+            BGRHist(nbbins, 0),
+            HoG(9,1)
         )
         mindimdiv = 10
         C = 0.1
-        classifier = MultiWarpClassifier(
+        nbparts = 4
+        deform_factor = 1.
+        classifier = DPMClassifier(
+            C,
             feature,
             mindimdiv,
-            C,
-            learning_rate=0.01,
-            nb_iter=100,
+            nbparts,
+            deform_factor,
+            nb_coord_iter=4,
+            nb_gd_iter=25,
+            learning_rate=0.001,
             verbose=True
         )
 
         trainsamples = []
         trainlabels = []
-        
+
         for k in self.traindata:
             for s in self.traindata[k]:
                 trainsamples.append(s)
                 trainlabels.append(k)
 
-        classifier.train(trainsamples, trainlabels)
+        print "Training..."
+        classifier.train_named(trainsamples, trainlabels)
+
+        print "Deformation coeffs:"
+        for dpm in classifier.dpms:
+            print dpm.deforms
+
+        print "Prediction..."
 
         testsamples = []
         expected = []
@@ -76,7 +77,7 @@ class TestMultiWarpClassifier(unittest.TestCase):
                 testsamples.append(s)
                 expected.append(k)
 
-        predicted = classifier.predict(testsamples)
+        predicted = classifier.predict_named(testsamples)
         print expected
         print predicted
         correct = 0

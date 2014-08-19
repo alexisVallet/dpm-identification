@@ -3,9 +3,7 @@
 import unittest
 import numpy as np
 
-from dpm_classifier import MultiDPMClassifier
-from warpclassifier import MultiWarpClassifier
-from grid_search import GridSearch
+from warpclassifier import WarpClassifier
 from ioutils import load_data
 from features import Combine, BGRHist, HoG
 
@@ -45,25 +43,14 @@ class TestGridSearch(unittest.TestCase):
         
         # Run training.
         nbbins = (4,4,4)
-        feature = HoG(9,1)
+        feature = Combine(
+            HoG(9,1),
+            BGRHist(nbbins,0)
+        )
         mindimdiv = [5, 10, 15, 20, 25, 30]
         C = [0.1]
         learning_rate = [0.001]
-        classifier = GridSearch(
-            lambda args: MultiWarpClassifier(
-                feature,
-                args['mdd'],
-                args['C'],
-                args['lr']
-            ),{
-                'mdd': mindimdiv,
-                'C': C,
-                'lr': learning_rate
-            },
-            k=3,
-            verbose=True
-        )
-
+        classifier = WarpClassifier()
         trainsamples = []
         trainlabels = []
         
@@ -72,7 +59,18 @@ class TestGridSearch(unittest.TestCase):
                 trainsamples.append(s)
                 trainlabels.append(k)
 
-        classifier.train(trainsamples, trainlabels)
+        classifier.train_gs_named(
+            trainsamples, 
+            trainlabels,
+            3,
+            feature=[feature],
+            mindimdiv=mindimdiv,
+            C=C,
+            learning_rate=learning_rate,
+            nb_iter=[100],
+            use_pca=[False],
+            verbose=[True]
+        )
 
         testsamples = []
         expected = []
@@ -82,7 +80,7 @@ class TestGridSearch(unittest.TestCase):
                 testsamples.append(s)
                 expected.append(k)
 
-        predicted = classifier.predict(testsamples)
+        predicted = classifier.predict_named(testsamples)
         print expected
         print predicted
         correct = 0

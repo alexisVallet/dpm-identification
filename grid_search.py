@@ -5,49 +5,57 @@ import numpy as np
 import itertools
 from random import shuffle
 
-class GridSearch:
-    def __init__(self, classifier_init, args, k=3, verbose=False):
-        """ Initializes the grid search classifier with a specific
-            initialization function, and a dictionary of arguments
-            to search over.
+class GridSearchMixin:
+    """ Mixin for classifiers adding grid search functionality, as well
+        as named labels. The class should implement the following:
+        - train(samples, int_labels)
+        - predict(samples) -> int_labels
+        - verbose -> boolean
+        - a constructor which takes the arguments to perform grid search
+          on, and fully resets the classifier (ie. one can call __init__
+          multiple times without corrupting the state).
+    """
+    def predict_named(self, samples):
+        int_labels = self.predict(samples)
+        return map(
+            lambda i: self.int_to_label[i],
+            self.predict(samples).tolist()
+        )
 
-        Arguments:
-            classifier_init
-                function taking a dictionary of arguments as parameters,
-                and returning an object implementing the
-                train(samples, labels) method as well as the 
-                predict(samples) method. Should be picklable.
-            args
-                dictionary specifying the space of arguments to search
-                over. i.e. if args = {C: [1, 0.1], alpha: [0.1, 0.01]}
-                then classifier init will be called with 
-                {C: 1, alpha: 0.1} then {C: 1, alpha: 0.01} etc.
-            k
-                number of folds in the cross validation.
-            verbose
-                set to true for printing information messages at regular
-                intervals.
-        """
-        self.classifier_init = classifier_init
-        self.args = args
-        self.k = k
-        self.verbose = verbose
+    def train_named(self, samples, labels):
+        self.int_to_label = list(set(labels))
+        label_to_int = {}
+        
+        for i in range(len(self.int_to_label)):
+            label_to_int[self.int_to_label[i]] = i
+        
+        int_labels = np.array(
+            map(lambda l: label_to_int[l], labels),
+            dtype=np.int32
+        )
+        self.train(samples, int_labels)
 
-    def train(self, samples, labels):
-        """ Trains the inner classifier with all possible combination
-            of parameters, selecting the parameters performing best on
-            a cross validation, then running training one final time on
-            the entire training set using these parameters.
+    def train_gs_named(self, samples, labels, k, **args):
+        """ Trains a classifier with grid search using named labels.
         """
-        assert len(samples) == len(labels)
-        nb_samples = len(samples)
-        # Randomly choose folds.
-        shuffled = zip(samples, labels)
-        shuffle(shuffled)
-        thresh = np.round(np.linspace(0, nb_samples, self.k + 1)).astype(np.int32)
+        self.int_to_label = list(set(labels))
+        label_to_int = {}
+        
+        for i in range(len(self.int_to_label)):
+            label_to_int[self.int_to_label[i]] = i
+        
+        int_labels = np.array(
+            map(lambda l: label_to_int[l], labels),
+            dtype=np.int32
+        )
+        self.train_gs(samples, int_labels, k, **args)
+
+    def _train_gs(self, shflsamples, shfllabels, k, **args):
         # Iterate over all combinations of parameters, find the best.
-        names = [name for name in self.args]
-        params = [self.args[name] for name in names]
+        nb_samples = len(shflsamples)
+        thresh = np.round(np.linspace(0, nb_samples, k + 1)).astype(np.int32)
+        names = [name for name in args]
+        params = [args[name] for name in names]
         iterator = itertools.product(*params)
         cv_results = []
         best_err_rate = 1.
@@ -63,18 +71,24 @@ class GridSearch:
             if self.verbose:
                 print "Running cross validation for " + repr(argdict)
 
-            for i in range(self.k):
-                print "Fold " + repr(i + 1) + " out of " + repr(self.k)
+            for i in range(k):
+                print "Fold " + repr(i + 1) + " out of " + repr(k)
                 # Set up train and test set for the fold.
-                test = shuffled[thresh[i]:thresh[i+1]]
-                testsamples, testlabels = zip(*test)
-                train = shuffled[0:thresh[i]] + shuffled[thresh[i+1]:]
-                trainsamples, trainlabels = zip(*train)
+                testlabels = shfllabels[thresh[i]:thresh[i+1]]
+                testsamples = shflsamples[thresh[i]:thresh[i+1]]
+                trainlabels = np.concatenate((
+                    shfllabels[0:thresh[i]],
+                    shfllabels[thresh[i+1]:]
+                ), axis=0)
+                trainsamples = (
+                    shflsamples[0:thresh[i]] + 
+                    shflsamples[thresh[i+1]:]
+                )
                 # Train the classifier.
-                classifier = self.classifier_init(argdict)
-                classifier.train(trainsamples, trainlabels)
+                self.__init__(**argdict)
+                self.train(trainsamples, trainlabels)
                 # Predict the test samples's labels.
-                predicted = classifier.predict(testsamples)
+                predicted = self.predict(testsamples)
                 # Measure the error rate.
                 for i in range(len(testlabels)):
                     if testlabels[i] != predicted[i]:
@@ -87,13 +101,46 @@ class GridSearch:
             if err_rate < best_err_rate:
                 best_params = argdict
                 best_err_rate = err_rate
-        # Finally, run training for the last time using the best performing
-        # set of parameters on the entire training set.
+        return (best_params, best_err_rate)
+
+    def shuffle_data(self, samples, labels):
+        nb_samples = len(samples)
+        # Randomly choose folds.
+        shuffledidxs = np.random.permutation(nb_samples)
+        shfllabels = labels[shuffledidxs]
+        shflsamples = []
+        for i in range(nb_samples):
+            shflsamples.append(samples[shuffledidxs[i]])
+
+        return (shflsamples, shfllabels)
+
+    def train_gs(self, samples, labels, k, **args):
+        """ Trains the classifier with all possible combination
+            of parameters, selecting the parameters performing best on
+            a cross validation, then running training one final time on
+            the entire training set using these parameters.
+
+        Arguments:
+            samples
+                list of training samples of arbitrary datatype.
+            labels
+                numpy vector of labels in the {0,...,c-1} set where
+                c is the number of classes.
+        """
+        assert len(samples) == labels.size
+        shflsamples, shfllabels = self.shuffle_data(samples, labels)
+        
+        best_params, best_err_rate = self._train_gs(
+            shflsamples,
+            shfllabels,
+            k,
+            **args
+        )
+
+        # Finally, run training for the last time using the best 
+        # performing set of parameters on the entire training set.
         if self.verbose:
             print "Best parameters found: " + repr(best_params)
             print "Now training on the entire training set..."
-        self.classifier = self.classifier_init(best_params)
-        self.classifier.train(samples, labels)
-
-    def predict(self, samples):
-        return self.classifier.predict(samples)
+        self.__init__(best_params)
+        self.train(samples, labels)
