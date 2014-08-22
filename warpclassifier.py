@@ -24,14 +24,12 @@ class BaseWarpClassifier:
         self.nbrowfeat = None
         self.nbcolfeat = None
 
-    def train(self, samples, labels):
-        # Compute feature maps.
-        fmaps, self.nbrowfeat, self.nbcolfeat = (
-            feat.warped_fmaps_simple(
-                samples, self.mindimdiv, self.feature
-            )
-        )
-
+    def _train(self, fmaps, labels):
+        """ Training procedure which takes precomputed feature maps as
+            inputs. For efficiency purposes in grid search, and in the
+            DPM classifier.
+        """
+        self.nbrowfeat, self.nbcolfeat = fmaps[0].shape[0:2]
         fvecs = map(lambda f: f.flatten('C'), fmaps)
 
         # Run multinomial logistic regression on it.
@@ -47,12 +45,22 @@ class BaseWarpClassifier:
         # shape.
         self.model_featmaps = []
 
+
         for i in range(self.lr.coef_.shape[1]):
             self.model_featmaps.append(
                 self.lr.coef_[:,i].reshape(
                     (self.nbrowfeat, self.nbcolfeat, self.feature.dimension)
                 )
             )
+
+    def train(self, samples, labels):
+        # Compute feature maps.
+        fmaps, nbrowfeat, nbcolfeat = (
+            feat.warped_fmaps_simple(
+                samples, self.mindimdiv, self.feature
+            )
+        )
+        self._train(fmaps, labels)
 
     def predict_proba(self, samples):
         # Compute a data matrix without dimensionality reduction.
@@ -65,6 +73,9 @@ class BaseWarpClassifier:
 
         return self.lr.predict_proba(fmaps)
 
+    def _predict(self, fmaps):
+        return self.lr.predict(fmaps)
+
     def predict(self, samples):
         fmaps = map(
             lambda s: self.feature.compute_featmap(
@@ -73,7 +84,7 @@ class BaseWarpClassifier:
             samples
         )
 
-        return self.lr.predict(fmaps)
+        return self._predict(fmaps)
 
 class WarpClassifier(BaseWarpClassifier, GridSearchMixin):
     def _train_gs(self, shflsamples, shfllabels, k, **args):
@@ -94,9 +105,9 @@ class WarpClassifier(BaseWarpClassifier, GridSearchMixin):
                 fvecs = map(lambda f: f.flatten('C'), fmaps)
                 # Run GS on the MLR.
                 lr = MLR()
-                err_rate, params = lr._train_gs(
+                err_rate, params = self._train_gs(
                     fvecs, 
-                    shfllabels, 
+                    shfllabels,
                     k,
                     C=args['C'],
                     nb_iter=args['nb_iter'],

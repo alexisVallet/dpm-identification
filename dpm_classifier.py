@@ -3,12 +3,13 @@
 import numpy as np
 import cv2
 import theano
+from itertools import product
 
 from matching import match_part
 from dpm import DPM, vectortodpm
 from warpclassifier import WarpClassifier
 from latent_mlr import LatentMLR
-from features import max_energy_subwindow, warped_fmaps_simple
+from features import max_energy_subwindow, warped_fmaps_simple, Combine, BGRHist, HoG
 from grid_search import GridSearchMixin
 
 def _init_dpm(warpmap, nbparts, partsize):
@@ -119,7 +120,8 @@ class BaseDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial
         logistic regression.
     """
-    def __init__(self, C, feature, mindimdiv, nbparts, deform_factor=1.,
+    def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
+                 mindimdiv=10, nbparts=4, deform_factor=1.,
                  nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.01, 
                  verbose=False):
         self.C = C
@@ -132,7 +134,10 @@ class BaseDPMClassifier:
         self.learning_rate = learning_rate
         self.verbose = verbose
 
-    def train(self, samples, labels):
+    def _train(self, fmaps, labels):
+        """ Training procedure which takes precomputed feature maps as inputs.
+            For efficiency purposes in grid search.
+        """
         # Initialize the model with a warping classifier, taking
         # high energy subwindows as parts.
         warp = WarpClassifier(
@@ -142,10 +147,10 @@ class BaseDPMClassifier:
             learning_rate=self.learning_rate,
             verbose=self.verbose
         )
-        warp.train(samples, labels)
+        warp._train(fmaps, labels)
         warpmaps = warp.model_featmaps
 
-        nb_classes = len(warpmaps)        
+        nb_classes = len(warpmaps)
         initdpms = []
         self.partsize = self.mindimdiv // 2
 
@@ -154,11 +159,7 @@ class BaseDPMClassifier:
                 _init_dpm(warpmaps[i], self.nbparts, self.partsize)
             )
 
-        # Compute feature maps.
-        fmaps, self.nbrowfeat, self.nbcolfeat = warped_fmaps_simple(
-            samples, self.mindimdiv, self.feature
-        )
-        nb_samples = len(samples)
+        nb_samples = len(fmaps)
         nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
 
         # Train the DPMs using latent MLR
@@ -197,7 +198,16 @@ class BaseDPMClassifier:
             self.dpms.append(
                 vectortodpm(self.lmlr.coef_[:,i], dpmsize)
             )
-       
+
+    def train(self, samples, labels):
+        # Compute feature maps.
+        fmaps, self.nbrowfeat, self.nbcolfeat = (
+            warped_fmaps_simple(
+                samples, self.mindimdiv, self.feature
+            )
+        )
+        self._train(fmaps, labels)
+
     def predict_proba(self, samples):
         # Convert images to feature maps.
         fmaps = map(lambda s: self.feature.compute_featmap(
@@ -208,6 +218,9 @@ class BaseDPMClassifier:
 
         return self.lmlr.predict_proba(fmaps)
 
+    def _predict(self, fmaps):
+        return self.lmlr.predict(fmaps)
+
     def predict(self, samples):
         # Convert images to feature maps.
         fmaps = map(lambda s: self.feature.compute_featmap(
@@ -216,7 +229,67 @@ class BaseDPMClassifier:
             self.nbcolfeat
         ), samples)
 
-        return self.lmlr.predict(fmaps)
+        return self._predict(fmaps)
 
 class DPMClassifier(BaseDPMClassifier, GridSearchMixin):
-    pass
+    def _train_gs(self, shflsamples, shfllabels, k, **args):
+        """ Override of the default gs procedure to avoir unnecessary
+            recomputation of feature maps.
+        """
+        nb_samples = len(shflsamples)
+        thresh = np.round(np.linspace(0, nb_samples, k + 1)).astype(np.int32)
+        best_err_rate = np.inf
+        best_params = {}
+        names = ['C', 'nbparts', 'deform_factor', 'nb_coord_iter',
+                 'nb_gd_iter', 'learning_rate', 'verbose']
+        params = [args[name] for name in names]
+
+        # Iterate over the feature parameters:
+        for feature in args['feature']:
+            for mindimdiv in args['mindimdiv']:
+                # Compute feature maps.
+                fmaps, self.nbrowfeat, self.nbcolfeat = (
+                    warped_fmaps_simple(
+                        shflsamples, mindimdiv, feature
+                    )
+                )
+                # Iterate over the remaining parameters:
+                for param in product(*params):
+                    argdict = {}
+                    for i in range(len(names)):
+                        argdict[names[i]] = param[i]
+                    # Run cross validation.
+                    nb_incorrect = 0
+                    if self.verbose:
+                        print "Running cross validation for " + repr(argdict)
+                    self.__init__(feature=feature, mindimdiv=mindimdiv, 
+                                  **argdict)
+                    for i in range(k):
+                        print "Fold " + repr(i + 1) + " out of " + repr(k)
+                        # Set up train and test set for the fold.
+                        testlabels = shfllabels[thresh[i]:thresh[i+1]]
+                        testsamples = fmaps[thresh[i]:thresh[i+1]]
+                        trainlabels = np.concatenate((
+                            shfllabels[0:thresh[i]],
+                            shfllabels[thresh[i+1]:]
+                        ), axis=0)
+                        trainsamples = (
+                            fmaps[0:thresh[i]] + 
+                            fmaps[thresh[i+1]:]
+                        )
+                        # Train the classifier.
+                        self._train(trainsamples, trainlabels)
+                        # Predict the test samples's labels.
+                        predicted = self._predict(testsamples)
+                        # Measure the error rate.
+                        for i in range(len(testlabels)):
+                            if testlabels[i] != predicted[i]:
+                                nb_incorrect += 1
+                    err_rate = float(nb_incorrect) / nb_samples
+                    if self.verbose:
+                        print "Finished cross validation for " + repr(argdict)
+                        print "Error rate: " + repr(err_rate)
+                    if err_rate < best_err_rate:
+                        best_params = argdict
+                        best_err_rate = err_rate
+        return (best_params, best_err_rate)            

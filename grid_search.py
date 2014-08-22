@@ -71,6 +71,7 @@ class GridSearchMixin:
             if self.verbose:
                 print "Running cross validation for " + repr(argdict)
 
+            self.__init__(**argdict)
             for i in range(k):
                 print "Fold " + repr(i + 1) + " out of " + repr(k)
                 # Set up train and test set for the fold.
@@ -85,10 +86,9 @@ class GridSearchMixin:
                     shflsamples[thresh[i+1]:]
                 )
                 # Train the classifier.
-                self.__init__(**argdict)
-                self.train(trainsamples, trainlabels)
+                self._train(trainsamples, trainlabels)
                 # Predict the test samples's labels.
-                predicted = self.predict(testsamples)
+                predicted = self._predict(testsamples)
                 # Measure the error rate.
                 for i in range(len(testlabels)):
                     if testlabels[i] != predicted[i]:
@@ -97,7 +97,6 @@ class GridSearchMixin:
             if self.verbose:
                 print "Finished cross validation for " + repr(argdict)
                 print "Error rate: " + repr(err_rate)
-            cv_results.append((argdict, err_rate))
             if err_rate < best_err_rate:
                 best_params = argdict
                 best_err_rate = err_rate

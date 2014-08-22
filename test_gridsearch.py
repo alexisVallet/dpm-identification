@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 
 from warpclassifier import WarpClassifier
+from dpm_classifier import DPMClassifier
 from ioutils import load_data
 from features import Combine, BGRHist, HoG
 
@@ -42,15 +43,13 @@ class TestGridSearch(unittest.TestCase):
                 trainlabels.append(l)
         
         # Run training.
-        nbbins = (4,4,4)
-        feature = Combine(
-            HoG(9,1),
-            BGRHist(nbbins,0)
-        )
-        mindimdiv = [5, 10, 15, 20, 25, 30]
-        C = [0.1]
-        learning_rate = [0.001]
-        classifier = WarpClassifier()
+        feature = [Combine(BGRHist((nbb,nbb,nbb),0), HoG(nbo, 1)) 
+                   for nbb in [4,5] for nbo in [5,10]]
+        mindimdiv = [10, 15]
+        C = [0.1, 0.01]
+        learning_rate = [0.01, 0.001]
+        nbparts = [5,10]
+        classifier = DPMClassifier()
         trainsamples = []
         trainlabels = []
         
@@ -63,12 +62,14 @@ class TestGridSearch(unittest.TestCase):
             trainsamples, 
             trainlabels,
             3,
-            feature=[feature],
-            mindimdiv=mindimdiv,
             C=C,
+            feature=feature,
+            mindimdiv=mindimdiv,
+            nbparts=nbparts,
             learning_rate=learning_rate,
-            nb_iter=[100],
-            use_pca=[False],
+            deform_factor=[1.],
+            nb_coord_iter=[4],
+            nb_gd_iter=[25],
             verbose=[True]
         )
 
