@@ -5,9 +5,6 @@ import theano
 import theano.tensor as T
 from grid_search import GridSearchMixin
 
-def compile_funcs():
-    """ Compiles and returns theano functions. """
-
 class BaseLatentMLR:
     def __init__(self, C, latent_function, latent_args, initbeta,
                  nb_coord_iter=1, nb_gd_iter=100, learning_rate=0.01,
@@ -77,7 +74,8 @@ class BaseLatentMLR:
         # batched_dot function to compute all the scores in one go.
         test_lat = T.tensor3('test_lat')
         predict_proba_sym = (
-            T.nnet.sigmoid(T.batched_dot(test_lat, self.beta.T).T + self.b)
+            T.nnet.softmax(T.batched_dot(test_lat, self.beta.T).T 
+                           + self.b)
         )
         self._predict_proba = theano.function(
             [test_lat],
