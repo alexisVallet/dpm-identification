@@ -7,6 +7,7 @@ import features as feat
 from latent_mlr import MLR
 import lr
 from grid_search import GridSearchMixin
+from dataset_transform import random_windows_fmaps
 
 class BaseWarpClassifier:
     def __init__(self, feature=feat.BGRHist((4,4,4),0), mindimdiv=10, 
@@ -55,12 +56,16 @@ class BaseWarpClassifier:
 
     def train(self, samples, labels):
         # Compute feature maps.
-        fmaps, nbrowfeat, nbcolfeat = (
-            feat.warped_fmaps_simple(
-                samples, self.mindimdiv, self.feature
-            )
+        fmaps, newlabels = random_windows_fmaps(
+            samples, 
+            labels,
+            self.mindimdiv,
+            10,
+            self.feature,
+            size=0.9
         )
-        self._train(fmaps, labels)
+
+        self._train(fmaps, newlabels)
 
     def predict_proba(self, samples):
         # Compute a data matrix without dimensionality reduction.
