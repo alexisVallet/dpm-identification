@@ -11,6 +11,7 @@ from warpclassifier import WarpClassifier
 from latent_mlr import LatentMLR
 from features import max_energy_subwindow, warped_fmaps_simple, Combine, BGRHist, HoG
 from grid_search import GridSearchMixin
+from dataset_transform import random_windows_fmaps
 
 def _init_dpm(warpmap, nbparts, partsize):
     """ Initializes a DPM by greedily taking high energy subwindows
@@ -122,8 +123,8 @@ class BaseDPMClassifier:
     """
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
                  mindimdiv=10, nbparts=4, deform_factor=1.,
-                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.01, 
-                 verbose=False):
+                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.01,
+                 use_pca=None, verbose=False):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
@@ -132,12 +133,14 @@ class BaseDPMClassifier:
         self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
+        self.use_pca = use_pca
         self.verbose = verbose
 
     def _train(self, fmaps, labels):
         """ Training procedure which takes precomputed feature maps as inputs.
             For efficiency purposes in grid search.
         """
+        self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
         # Initialize the model with a warping classifier, taking
         # high energy subwindows as parts.
         warp = WarpClassifier(
@@ -160,7 +163,7 @@ class BaseDPMClassifier:
             )
 
         nb_samples = len(fmaps)
-        nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
+        nb_features = self.nbrowfeat * self.nbcolfeat * self.featdim
 
         # Train the DPMs using latent MLR
         dpmsize = initdpms[0].size() # All DPMs should have the same size.
@@ -201,95 +204,132 @@ class BaseDPMClassifier:
 
     def train(self, samples, labels):
         # Compute feature maps.
-        fmaps, self.nbrowfeat, self.nbcolfeat = (
-            warped_fmaps_simple(
-                samples, self.mindimdiv, self.feature
+        if self.use_pca != None:
+            fmaps, newlabels, self.pca = random_windows_fmaps(
+                samples,
+                labels,
+                self.mindimdiv,
+                10,
+                self.feature,
+                size=0.7,
+                pca=self.use_pca
             )
-        )
-        self._train(fmaps, labels)
+            self._train(fmaps, newlabels)
+        else:
+            fmaps, newlabels = random_windows_fmaps(
+                samples,
+                labels,
+                self.mindimdiv,
+                10,
+                self.feature,
+                size=0.7,
+                pca=None
+            )
+            self._train(fmaps, newlabels)
+
+    def test_fmaps(self, samples):
+        nb_samples = len(samples)
+        if self.pca != None:
+            # Compute a data matrix without dimensionality reduction.
+            X = np.empty(
+                [nb_samples,
+                 self.nbrowfeat,
+                 self.nbcolfeat,
+                 self.feature.dimension],
+                dtype=theano.config.floatX
+            )
+            
+            for i in range(nb_samples):
+                X[i] = self.feature.compute_featmap(
+                    samples[i], self.nbrowfeat, self.nbcolfeat
+                )
+            # X is now a data matrix of feature maps, I want just a data mat
+            # of features to project.
+            X_feat = X.reshape(
+                [nb_samples * self.nbrowfeat * self.nbcolfeat, 
+                 self.feature.dimension]
+            )
+            # Project the features to the principal subspace.
+            X_feat_new = self.pca.transform(X_feat)
+            # Convert back to feature maps.
+            X_new = X_feat_new.reshape(
+                [nb_samples, self.nbrowfeat, self.nbcolfeat,
+                 self.pca.n_components]
+            )
+            # Convert it back to a feature maps representation.
+            fmaps = []
+            for i in range(nb_samples):
+                fmaps.append(X_new[i])
+            return fmaps
+        else:
+            fmaps = []
+            for sample in samples:
+                fmaps.append(self.feature.compute_featmap(
+                    sample, self.nbrowfeat, self.nbcolfeat
+                ))
+            return fmaps
 
     def predict_proba(self, samples):
-        # Convert images to feature maps.
-        fmaps = map(lambda s: self.feature.compute_featmap(
-            s, 
-            self.nbrowfeat, 
-            self.nbcolfeat
-        ), samples)
-
-        return self.lmlr.predict_proba(fmaps)
+        return self.lmlr.predict_proba(self.test_fmaps(samples))
 
     def _predict(self, fmaps):
         return self.lmlr.predict(fmaps)
 
     def predict(self, samples):
-        # Convert images to feature maps.
-        fmaps = map(lambda s: self.feature.compute_featmap(
-            s, 
-            self.nbrowfeat, 
-            self.nbcolfeat
-        ), samples)
-
-        return self._predict(fmaps)
+        return self._predict(self.test_fmaps(samples))
 
 class DPMClassifier(BaseDPMClassifier, GridSearchMixin):
-    def _train_gs(self, shflsamples, shfllabels, k, **args):
-        """ Override of the default gs procedure to avoir unnecessary
-            recomputation of feature maps.
-        """
-        nb_samples = len(shflsamples)
-        thresh = np.round(np.linspace(0, nb_samples, k + 1)).astype(np.int32)
-        best_err_rate = np.inf
-        best_params = {}
-        names = ['C', 'nbparts', 'deform_factor', 'nb_coord_iter',
-                 'nb_gd_iter', 'learning_rate', 'verbose']
-        params = [args[name] for name in names]
+    def train_gs_fast_named(self, samples, labels, k, **args):
+        self.int_to_label = list(set(labels))
+        label_to_int = {}
+        
+        for i in range(len(self.int_to_label)):
+            label_to_int[self.int_to_label[i]] = i
+        
+        int_labels = np.array(
+            map(lambda l: label_to_int[l], labels),
+            dtype=np.int32
+        )
 
-        # Iterate over the feature parameters:
-        for feature in args['feature']:
-            for mindimdiv in args['mindimdiv']:
-                # Compute feature maps.
-                fmaps, self.nbrowfeat, self.nbcolfeat = (
-                    warped_fmaps_simple(
-                        shflsamples, mindimdiv, feature
-                    )
-                )
-                # Iterate over the remaining parameters:
-                for param in product(*params):
-                    argdict = {}
-                    for i in range(len(names)):
-                        argdict[names[i]] = param[i]
-                    # Run cross validation.
-                    nb_incorrect = 0
-                    if self.verbose:
-                        print "Running cross validation for " + repr(argdict)
-                    self.__init__(feature=feature, mindimdiv=mindimdiv, 
-                                  **argdict)
-                    for i in range(k):
-                        print "Fold " + repr(i + 1) + " out of " + repr(k)
-                        # Set up train and test set for the fold.
-                        testlabels = shfllabels[thresh[i]:thresh[i+1]]
-                        testsamples = fmaps[thresh[i]:thresh[i+1]]
-                        trainlabels = np.concatenate((
-                            shfllabels[0:thresh[i]],
-                            shfllabels[thresh[i+1]:]
-                        ), axis=0)
-                        trainsamples = (
-                            fmaps[0:thresh[i]] + 
-                            fmaps[thresh[i+1]:]
-                        )
-                        # Train the classifier.
-                        self._train(trainsamples, trainlabels)
-                        # Predict the test samples's labels.
-                        predicted = self._predict(testsamples)
-                        # Measure the error rate.
-                        for i in range(len(testlabels)):
-                            if testlabels[i] != predicted[i]:
-                                nb_incorrect += 1
-                    err_rate = float(nb_incorrect) / nb_samples
-                    if self.verbose:
-                        print "Finished cross validation for " + repr(argdict)
-                        print "Error rate: " + repr(err_rate)
-                    if err_rate < best_err_rate:
-                        best_params = argdict
-                        best_err_rate = err_rate
-        return (best_params, best_err_rate)            
+        return self.train_gs_fast(samples, int_labels, k, **args)
+
+
+    def train_gs_fast(self, samples, labels, k, C, feature, mindimdiv, 
+                      nbparts, deform_factor, learning_rate, nb_iter, 
+                      nb_coord_iter, nb_gd_iter, cachedir=None):
+        """ Fast grid search training procedure, using the warping classifier
+            to set the feature parameters (feature, mindimdiv) faster as a
+            first step, then use these parameters to set 
+            (nbparts, C, learning_rate) on the DPM classifier.
+        """
+        # Run GS on the warping classifier.
+        warp = WarpClassifier()
+        best_params_warp = warp.train_gs(
+            samples, 
+            labels,
+            k,
+            C=C, 
+            feature=feature,
+            mindimdiv=mindimdiv,
+            learning_rate=learning_rate,
+            nb_iter=nb_iter,
+            use_pca=[0.9],
+            verbose=[self.verbose]
+        )
+        best_feat = best_params_warp['feature']
+        best_mdd = best_params_warp['mindimdiv']
+        # Then on the DPM classifier, with fixed feature parameters.
+        return self.train_gs(
+            samples, 
+            labels, 
+            C=C,
+            feature=[best_feat],
+            mindimdiv=[best_mdd],
+            nbparts=nbparts,
+            deform_factor=deform_factor,
+            nb_coord_iter=nb_coord_iter,
+            nb_gd_iter=nb_gd_iter,
+            learning_rate=learning_rate,
+            use_pca=[0.9],
+            verbose=[self.verbose]
+        )

@@ -3,6 +3,7 @@
 import cv2
 import numpy as np
 import theano
+from sklearn.decomposition import PCA
 from skimage import exposure
 
 class Feature:
@@ -30,6 +31,9 @@ class Combine(Feature):
         fmaps = map(lambda f: f.compute_featmap(image, n, m),
                     self.features)
         return np.concatenate(fmaps, axis=2)
+
+    def __repr__(self):
+        return "%s(%r)" % (self.__class__, self.__dict__)
 
 class BGRHist(Feature):
     """ Computes flattened and scaled BGR histograms as features.
@@ -70,6 +74,9 @@ class BGRHist(Feature):
 
     def visualize_featmap(self, fmap):
         return visualize_featmap(fmap, bgrhistvis)
+
+    def __repr__(self):
+        return "BGRHist(%r,%r)" % (self.nbbins, self.block_halfsize)
 
 class HoG(Feature):
     """ Computes HoG features, as described by Dalal and Triggs, 2005. Much
@@ -167,6 +174,9 @@ class HoG(Feature):
                                      float(block[bi,bj,o]))
         hog_image = exposure.rescale_intensity(hog_image, in_range=(0,0.2))
         return hog_image
+
+    def __repr__(self):
+        return "HoG(%r, %r)" % (self.nb_orient, self.block_halfsize)
 
 def block_generator(image, n, m):
     """ Returns a generator which iterates over non-overlapping blocks
@@ -304,7 +314,10 @@ def warped_fmaps_dimred(samples, mindimdiv, feature, min_var=0.9):
     # Compute all the features.
     fmaps, rows, cols = warped_fmaps_simple(samples, mindimdiv, feature)
     # Slap them into a data matrix.
-    X = np.empty([nb_samples * rows * cols, feature.dimension])
+    X = np.empty(
+        [nb_samples * rows * cols, feature.dimension],
+        dtype=theano.config.floatX
+    )
     for i in range(nb_samples):
         X[i*rows*cols:(i+1)*rows*cols] = np.reshape(
             fmaps[i], [rows * cols, feature.dimension]

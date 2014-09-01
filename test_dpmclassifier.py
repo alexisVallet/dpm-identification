@@ -49,6 +49,7 @@ class TestDPMClassifier(unittest.TestCase):
             nb_coord_iter=4,
             nb_gd_iter=25,
             learning_rate=0.001,
+            use_pca=0.9,
             verbose=True
         )
 
@@ -61,7 +62,16 @@ class TestDPMClassifier(unittest.TestCase):
                 trainlabels.append(k)
 
         print "Training..."
-        classifier.train_named(trainsamples, trainlabels)
+        cachename = 'data/dpmid-cache/test'
+        if not os.path.isfile(cachename):
+            classifier.train_named(trainsamples, trainlabels)
+            cachefile = open(cachename, 'w')
+            pickle.dump(classifier, cachefile)
+            cachefile.close()
+        else:
+            cachefile = open(cachename)
+            classifier = pickle.load(cachefile)
+            cachefile.close()
 
         print "Deformation coeffs:"
         for dpm in classifier.dpms:

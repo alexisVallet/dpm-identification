@@ -2,12 +2,13 @@
 """
 from sklearn.linear_model import LogisticRegression, SGDClassifier
 import numpy as np
+import theano
 
 import features as feat
 from latent_mlr import MLR
 import lr
 from grid_search import GridSearchMixin
-from dataset_transform import random_windows_fmaps
+from dataset_transform import random_windows_fmaps, left_right_flip
 
 class BaseWarpClassifier:
     def __init__(self, feature=feat.BGRHist((4,4,4),0), mindimdiv=10, 
@@ -30,7 +31,7 @@ class BaseWarpClassifier:
             inputs. For efficiency purposes in grid search, and in the
             DPM classifier.
         """
-        self.nbrowfeat, self.nbcolfeat = fmaps[0].shape[0:2]
+        self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
         fvecs = map(lambda f: f.flatten('C'), fmaps)
 
         # Run multinomial logistic regression on it.
@@ -48,33 +49,69 @@ class BaseWarpClassifier:
 
 
         for i in range(self.lr.coef_.shape[1]):
-            self.model_featmaps.append(
-                self.lr.coef_[:,i].reshape(
-                    (self.nbrowfeat, self.nbcolfeat, self.feature.dimension)
-                )
+            fmap = self.lr.coef_[:,i].reshape(
+                [self.nbrowfeat, self.nbcolfeat, self.featdim]
             )
+
+            self.model_featmaps.append(fmap)
 
     def train(self, samples, labels):
         # Compute feature maps.
-        fmaps, newlabels = random_windows_fmaps(
-            samples, 
-            labels,
-            self.mindimdiv,
-            10,
-            self.feature,
-            size=0.9
-        )
-
-        self._train(fmaps, newlabels)
+        if self.use_pca != None:
+            fmaps, newlabels, self.pca = random_windows_fmaps(
+                samples,
+                labels,
+                self.mindimdiv,
+                10,
+                self.feature,
+                size=0.7,
+                pca=self.use_pca
+            )
+            self._train(fmaps, newlabels)
+        else:
+            fmaps, newlabels = random_windows_fmaps(
+                samples,
+                labels,
+                self.mindimdiv,
+                10,
+                self.feature,
+                size=0.7,
+                pca=None
+            )
+            self._train(fmaps, newlabels)
 
     def predict_proba(self, samples):
+        nb_samples = len(samples)
         # Compute a data matrix without dimensionality reduction.
-        fmaps = map(
-            lambda s: self.feature.compute_featmap(
-                s, self.nbrowfeat, self.nbcolfeat
-            ).flatten('C'),
-            samples
+        X = np.empty(
+            [nb_samples,
+             self.nbrowfeat,
+             self.nbcolfeat,
+             self.feature.dimension],
+            dtype=theano.config.floatX
         )
+
+        for i in range(nb_samples):
+            X[i] = self.feature.compute_featmap(
+                samples[i], self.nbrowfeat, self.nbcolfeat
+            )
+        # X is now a data matrix of feature maps, I want just a data matrix
+        # of features to project.
+        X_feat = X.reshape(
+            [nb_samples * self.nbrowfeat * self.nbcolfeat, 
+             self.feature.dimension]
+        )
+        # Project the features to the principal subspace.
+        X_feat_new = self.pca.transform(X_feat)
+        # Convert back to feature maps.
+        X_new = X_feat_new.reshape(
+            [nb_samples, self.nbrowfeat * self.nbcolfeat *
+             self.pca.n_components]
+        )
+        # Convert it back to a feature maps representation.
+        fmaps = []
+        for i in range(nb_samples):
+            fmaps.append(X_new[i])
 
         return self.lr.predict_proba(fmaps)
 
@@ -82,45 +119,39 @@ class BaseWarpClassifier:
         return self.lr.predict(fmaps)
 
     def predict(self, samples):
-        fmaps = map(
-            lambda s: self.feature.compute_featmap(
-                s, self.nbrowfeat, self.nbcolfeat
-            ).flatten('C'),
-            samples
+        nb_samples = len(samples)
+        # Compute a data matrix without dimensionality reduction.
+        X = np.empty(
+            [nb_samples,
+             self.nbrowfeat,
+             self.nbcolfeat,
+             self.feature.dimension],
+            dtype=theano.config.floatX
         )
+
+        for i in range(nb_samples):
+            X[i] = self.feature.compute_featmap(
+                samples[i], self.nbrowfeat, self.nbcolfeat
+            )
+        # X is now a data matrix of feature maps, I want just a data matrix
+        # of features to project.
+        X_feat = X.reshape(
+            [nb_samples * self.nbrowfeat * self.nbcolfeat, 
+             self.feature.dimension]
+        )
+        # Project the features to the principal subspace.
+        X_feat_new = self.pca.transform(X_feat)
+        # Convert back to feature maps.
+        X_new = X_feat_new.reshape(
+            [nb_samples, self.nbrowfeat * self.nbcolfeat *
+             self.pca.n_components]
+        )
+        # Convert it back to a feature maps representation.
+        fmaps = []
+        for i in range(nb_samples):
+            fmaps.append(X_new[i])
 
         return self._predict(fmaps)
 
 class WarpClassifier(BaseWarpClassifier, GridSearchMixin):
-    def _train_gs(self, shflsamples, shfllabels, k, **args):
-        """ Override of the normal gs procedure to avoid unnecessary
-            recomputation of feature maps.
-        """
-        best_err_rate = np.inf
-        best_params = {}
-        # Iterate over the feature parameters:
-        for feature in args['feature']:
-            for mindimdiv in args['mindimdiv']:
-                # Compute feature maps.
-                fmaps, self.nbrowfeat, self.nbcolfeat = (
-                    feat.warped_fmaps_simple(
-                        shflsamples, mindimdiv, feature
-                    )
-                )
-                fvecs = map(lambda f: f.flatten('C'), fmaps)
-                # Run GS on the MLR.
-                lr = MLR()
-                err_rate, params = self._train_gs(
-                    fvecs, 
-                    shfllabels,
-                    k,
-                    C=args['C'],
-                    nb_iter=args['nb_iter'],
-                    learning_rate=args['learning_rate'],
-                    verbose=args['verbose']
-                )
-                if err_rate < best_err_rate:
-                    best_params = params.copy()
-                    best_params['feature'] = feature,
-                    best_params['mindimdiv'] = mindimdiv
-        return (best_params, best_err_rate)
+    pass

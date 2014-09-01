@@ -3,6 +3,8 @@
 import numpy as np
 import theano
 import theano.tensor as T
+from scipy.optimize import fmin_l_bfgs_b
+
 from grid_search import GridSearchMixin
 
 class BaseLatentMLR:
@@ -91,7 +93,7 @@ class BaseLatentMLR:
         assert labels.size == len(samples)
         for i in range(labels.size):
             assert labels[i] in range(self.nb_classes)
-        
+
         nb_samples = len(samples)
         # Set and compile the theano gradient descent update function.
         lat_pos = theano.shared(
@@ -124,7 +126,6 @@ class BaseLatentMLR:
         cost = (
             regularization - self.C * T.sum(losses)
         )
-
         # Gradients.
         grad_beta = T.grad(cost, self.beta)
         grad_b = T.grad(cost, self.b)
@@ -153,7 +154,8 @@ class BaseLatentMLR:
             [self.nb_features, self.nb_classes],
             dtype=theano.config.floatX
         )
-        bestcost = np.inf
+        bestcost = None
+        t = 0
 
         for t_coord in range(self.nb_coord_iter):
             # Compute the best positive latent vectors.
@@ -176,7 +178,7 @@ class BaseLatentMLR:
                 lat_neg.set_value(new_lat_neg)
                 cost, gradnorm = grad_descent()
 
-                if cost < bestcost:
+                if bestcost == None or cost < bestcost:
                     bestmodel = (
                         np.array(self.beta.get_value(), copy=True),
                         np.array(self.b.get_value(), copy=True)

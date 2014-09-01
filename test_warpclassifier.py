@@ -44,8 +44,8 @@ class TestWarpClassifier(unittest.TestCase):
         # Run training.
         nbbins = (4,4,4)
         feature = Combine(
-            HoG(5, 1),
-            BGRHist(nbbins, 1)
+            HoG(9, 1),
+            BGRHist(nbbins, 0)
         )
         mindimdiv = 10
         C = 0.1
@@ -55,7 +55,8 @@ class TestWarpClassifier(unittest.TestCase):
             C,
             learning_rate=0.001,
             nb_iter=100,
-            verbose=True
+            verbose=True,
+            use_pca=0.9
         )
 
         trainsamples = []

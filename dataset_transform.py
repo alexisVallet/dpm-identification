@@ -4,7 +4,7 @@
 import numpy as np
 import cv2
 
-from features import Feature, warped_fmaps_simple
+from features import Feature, warped_fmaps_simple, warped_fmaps_dimred
 
 def random_windows_fmaps(images, labels, out_mdd, win_per_sample,
                          feature, size=0.9, pca=None):
@@ -40,11 +40,23 @@ def random_windows_fmaps(images, labels, out_mdd, win_per_sample,
     assert win_per_sample > 0
     assert isinstance(feature, Feature)
     assert 0. < size < 1.
+    assert pca == None or 0. < pca <= 1.
     nb_samples = len(images)
     # Compute the warped feature maps allowing for the right output
     # minimum dimension.
     fmap_mdd = int((1. + (1. - size)) * out_mdd)
-    fmaps, frows, fcols = warped_fmaps_simple(images, fmap_mdd, feature)
+    fmaps = None
+    frows = None
+    fcols = None
+    pca_obj = None
+    if pca == None:
+        fmaps, frows, fcols = warped_fmaps_simple(images, fmap_mdd, feature)
+    else:
+        fmaps, frows, fcols, pca_obj = warped_fmaps_dimred(
+            images, fmap_mdd, feature, min_var=pca
+        )
+        print ("Reduced feature dimension from " + repr(feature.dimension) +
+               " to " + repr(fmaps[0].shape[2]))
     # Compute output feature maps dimensions.
     meanar = float(fcols) / frows
     out_rows = None
@@ -72,4 +84,25 @@ def random_windows_fmaps(images, labels, out_mdd, win_per_sample,
             out_fmaps.append(subwin)
             out_labels[offset] = labels[i]
             offset += 1
-    return (out_fmaps, out_labels)
+
+    if pca == None:
+        return (out_fmaps, out_labels)
+    else:
+        return (out_fmaps, out_labels, pca_obj)
+
+def left_right_flip(fmaps, labels):
+    """ For each sample feature map (or image), add a left-right flipped
+        version with the same label.
+    """
+    assert len(fmaps) == labels.size
+    nb_samples = len(fmaps)
+    fmaps_new = []
+    labels_new = np.empty([nb_samples * 2], np.int32)
+
+    for i in range(nb_samples):
+        fmaps_new.append(fmaps[i])
+        fmaps_new.append(np.fliplr(fmaps[i]))
+        labels_new[2*i] = labels[i]
+        labels_new[2*i+1] = labels[i]
+
+    return (fmaps_new, labels_new)

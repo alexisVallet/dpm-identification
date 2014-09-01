@@ -4,6 +4,7 @@
 import numpy as np
 import itertools
 from random import shuffle
+from guppy import hpy
 
 class GridSearchMixin:
     """ Mixin for classifiers adding grid search functionality, as well
@@ -48,7 +49,7 @@ class GridSearchMixin:
             map(lambda l: label_to_int[l], labels),
             dtype=np.int32
         )
-        self.train_gs(samples, int_labels, k, **args)
+        return self.train_gs(samples, int_labels, k, **args)
 
     def _train_gs(self, shflsamples, shfllabels, k, **args):
         # Iterate over all combinations of parameters, find the best.
@@ -86,9 +87,9 @@ class GridSearchMixin:
                     shflsamples[thresh[i+1]:]
                 )
                 # Train the classifier.
-                self._train(trainsamples, trainlabels)
+                self.train(trainsamples, trainlabels)
                 # Predict the test samples's labels.
-                predicted = self._predict(testsamples)
+                predicted = self.predict(testsamples)
                 # Measure the error rate.
                 for i in range(len(testlabels)):
                     if testlabels[i] != predicted[i]:
@@ -143,3 +144,4 @@ class GridSearchMixin:
             print "Now training on the entire training set..."
         self.__init__(best_params)
         self.train(samples, labels)
+        return best_params

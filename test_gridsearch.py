@@ -70,6 +70,7 @@ class TestGridSearch(unittest.TestCase):
             deform_factor=[1.],
             nb_coord_iter=[4],
             nb_gd_iter=[25],
+            use_pca=[0.9],
             verbose=[True]
         )
 
