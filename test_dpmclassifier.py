@@ -4,9 +4,9 @@ import cv2
 import cPickle as pickle
 import os.path
 
-from dpm_classifier import MultiDPMClassifier
+from dpm_classifier import DPMClassifier
 from ioutils import load_data
-from features import Feature
+from features import Combine, BGRHist, HoG
 
 class TestDPMClassifier(unittest.TestCase):
     @classmethod
@@ -32,18 +32,24 @@ class TestDPMClassifier(unittest.TestCase):
 
     def test_binary_dpm_classifier(self):
         nbbins = (4,4,4)
-        feature = Feature('bgrhist', np.prod(nbbins), nbbins)
+        feature = Combine(
+            BGRHist(nbbins, 0),
+            HoG(9,1)
+        )
         mindimdiv = 10
         C = 0.1
         nbparts = 4
-        classifier = MultiDPMClassifier(
+        deform_factor = 1.
+        classifier = DPMClassifier(
             C,
             feature,
             mindimdiv,
             nbparts,
+            deform_factor,
             nb_coord_iter=4,
-            nb_gd_iter=50,
-            learning_rate=0.01,
+            nb_gd_iter=25,
+            learning_rate=0.001,
+            use_pca=0.9,
             verbose=True
         )
 
@@ -56,16 +62,21 @@ class TestDPMClassifier(unittest.TestCase):
                 trainlabels.append(k)
 
         print "Training..."
-        cachename = 'data/dpmid-cache/test_lmlr_dpm_50'
-        if os.path.isfile(cachename):
-            cachefile = open(cachename)
-            classifier = pickle.load(cachefile)
-            cachefile.close()
-        else:
-            classifier.train(trainsamples, trainlabels)
+        cachename = 'data/dpmid-cache/test'
+        if not os.path.isfile(cachename):
+            classifier.train_named(trainsamples, trainlabels)
             cachefile = open(cachename, 'w')
             pickle.dump(classifier, cachefile)
             cachefile.close()
+        else:
+            cachefile = open(cachename)
+            classifier = pickle.load(cachefile)
+            cachefile.close()
+
+        print "Deformation coeffs:"
+        for dpm in classifier.dpms:
+            print dpm.deforms
+
         print "Prediction..."
 
         testsamples = []
@@ -76,7 +87,7 @@ class TestDPMClassifier(unittest.TestCase):
                 testsamples.append(s)
                 expected.append(k)
 
-        predicted = classifier.predict(testsamples)
+        predicted = classifier.predict_named(testsamples)
         print expected
         print predicted
         correct = 0

@@ -3,13 +3,15 @@
 import numpy as np
 import cv2
 import theano
+from itertools import product
 
 from matching import match_part
 from dpm import DPM, vectortodpm
-from warpclassifier import WarpClassifier, MultiWarpClassifier
-from latent_lr import LatentLR
+from warpclassifier import WarpClassifier
 from latent_mlr import LatentMLR
-from features import max_energy_subwindow, compute_featmap, warped_fmaps_simple
+from features import max_energy_subwindow, warped_fmaps_simple, Combine, BGRHist, HoG
+from grid_search import GridSearchMixin
+from dataset_transform import random_windows_fmaps
 
 def _init_dpm(warpmap, nbparts, partsize):
     """ Initializes a DPM by greedily taking high energy subwindows
@@ -17,11 +19,7 @@ def _init_dpm(warpmap, nbparts, partsize):
     """
     initparts = []
     initanchors = []
-    # Initialize deformation to 0.1 times the square leading dimension.
-    # This is to counteract to some extent the effect of feature scaling
-    # on displacements.
-    leading_dim = max(warpmap.shape[0], warpmap.shape[1])**2
-    initdeforms = [leading_dim * np.array([0,0,0.1,0.1])] * nbparts
+    initdeforms = [np.array([0,0,0.01,0.01])] * nbparts
     warpcopy = np.array(warpmap, copy=True)
     
     for i in range(nbparts):
@@ -36,7 +34,7 @@ def _init_dpm(warpmap, nbparts, partsize):
         warpcopy[ai:ai+partsize,aj:aj+partsize] = 0
     return DPM(initparts, initanchors, initdeforms)
 
-def _best_match(dpm, featmap, debug=False):
+def _best_match(dpm, featmap, deform_factor, debug=False):
     """ Computes the best matching subwindows and corresponding
         displacements of a root less deformable parts model on a
         feature map.
@@ -57,27 +55,24 @@ def _best_match(dpm, featmap, debug=False):
     """
     winsanddisp = map(
         lambda i: match_part(
-            featmap, 
+            featmap,
             dpm.parts[i], 
             dpm.anchors[i],
             dpm.deforms[i],
+            deform_factor,
             debug
         ),
         range(len(dpm.parts))
     )
     subwins = [res[0] for res in winsanddisp]
     displacements = [res[1:3] for res in winsanddisp]
-
-    # Scale displacements linearly to the [-1;1] range to keep them
-    # at a scale comparable to subwindows. The squared displacements are 
-    # limited to a range of leading_fmap_dim^2 in value. We'll
-    # assume that all feature maps are warped to the same dimension.
-    leading_dim = max(featmap.shape[0], featmap.shape[1])**2
     scaled_disp = []
 
     for i in range(len(dpm.parts)):
         di, dj = displacements[i]
-        scaled_disp.append((float(di) / leading_dim, float(dj) / leading_dim))
+        scaled_disp.append(
+            (float(di) * deform_factor, float(dj) * deform_factor)
+        )
 
     return (subwins, scaled_disp)
 
@@ -85,12 +80,14 @@ def _best_match_wrapper(modelvector, featmap, args):
     """ Wrapper to _best_match to convert everything into the proper
         vector format.
     """
-    modelsize = args
+    modelsize = args['size']
+    deform_factor = args['df']
 
     # Compute the best match on the converted model data structure.
     (subwins, displacements) = _best_match(
         vectortodpm(modelvector, modelsize),
-        featmap
+        featmap,
+        deform_factor
     )
 
     # Put the computed latent values into a proper latent vector.
@@ -104,145 +101,59 @@ def _best_match_wrapper(modelvector, featmap, args):
     # Introduce the part displacements.
     for disp in displacements:
         di, dj = disp
-        if abs(di) > 30 or abs(dj) > 30:
-            print "Invalid displacements: "
-            print (di, dj)
         latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
         offset = offset+4
     assert offset == modelvector.size
 
     return latvec
 
-class BinaryDPMClassifier:
-    def __init__(self, C, feature, mindimdiv, nbparts, verbose=False,
-                 debug=False):
-        """ Initializes the classifier with a given number of parts.
-        
-        Arguments:
-            C         Soft margin parameter for latent logistic regression.
-            feature   Feature function to use for individual image patches.
-            mindimdiv Number of splits along each image's smallest dimension.
-            nbparts   Number of parts to train the classifier with.
-            verbose   Set to True for regular information messages.
-            debug     If set to True, will stop execution at various point
-                      showing the current model being trained.
-        """
-        self.C = C
-        self.feature = feature
-        self.mindimdiv = mindimdiv
-        self.nbparts = nbparts
-        self.verbose = verbose
-        self.debug = debug
-
-    def tofeatmap(self, image):
-        return compute_featmap(
-            image, self.nbrowfeat, self.nbcolfeat, self.feature
-        )
-
-    def train(self, positives, negatives):
-        """ Fits the classifier given a set of positive images and a set
-            of negative images.
-        
-        Arguments:
-            positives    array of positive images, i.e. the classifier 
-                         should return a probability close to 1 for them.
-            negatives    array of negative images, i.e. the classifier 
-                         should return a probability close to 0 for them.
-        """
-        # Initialize the model by training a warping classifier on all
-        # images, and greedily taking square high energy subwindows as
-        # parts.
-        warp = WarpClassifier(self.feature, self.mindimdiv, C=self.C)
-        warp.train(positives, negatives)
-        warpmap = np.array(warp.model_featmap, copy=True)
-
-        if self.debug:
-            cv2.namedWindow('warped', cv2.WINDOW_NORMAL)
-            cv2.imshow('warped', self.feature.vis_featmap(warpmap))
-            cv2.waitKey(0)
-
-        partsize = self.mindimdiv // 2
-        
-        initdpm = _init_dpm(warpmap, self.nbparts, partsize)
-
-        if self.debug:
-            cv2.namedWindow('allparts', cv2.WINDOW_NORMAL)
-            cv2.imshow(
-                'allparts', 
-                initdpm.partsimage(self.feature.visualize)
-            )
-            cv2.waitKey(0)
-        # Compute feature maps for all samples.
-        self.nbrowfeat = warp.nbrowfeat
-        self.nbcolfeat = warp.nbcolfeat
-        posmaps = map(self.tofeatmap, positives)
-        negmaps = map(self.tofeatmap, negatives)
-        # Train the DPM using binary LLR.
-        modelsize = initdpm.size()
-        self.llr = LatentLR(
-            _best_match_wrapper,
-            latent_args={'modelsize': modelsize, 'debug': self.debug},
-            verbose=self.verbose
-        )
-        self.llr.train(self.C, posmaps, negmaps, initdpm.tovector(), 0)
-        # For vizualisation, compute the trained DPM
-        self.dpm = vectortodpm(self.llr.coef_, modelsize)
-
-    def predict_proba(self, images):
-        """ Predicts probabilities that images are positive samples.
-
-        Arguments:
-            images    image to predict probabilities for.
-        """
-        assert self.llr != None
-
-        fmaps = map(self.tofeatmap, images)
-        
-        # Use the internal latent logistic regression to predict 
-        # probabilities.
-        return self.llr.predict_proba(fmaps)
-
 def _best_matches(beta, fmaps, labels, args):
     nb_features, nb_classes = beta.shape
     nb_samples = len(fmaps)
-    latents = np.empty([nb_samples, nb_features], 
-                       dtype=theano.config.floatX)
-
+    latents = np.empty([nb_samples, nb_features],
+    dtype=theano.config.floatX)
     for i in range(nb_samples):
         latvec = _best_match_wrapper(beta[:,labels[i]], fmaps[i], args)
         latents[i] = latvec
-
     return latents
 
-class MultiDPMClassifier:
+class BaseDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial
         logistic regression.
     """
-    def __init__(self, C, feature, mindimdiv, nbparts, nb_coord_iter=4,
-                 nb_gd_iter=25, learning_rate=0.01, verbose=False):
+    def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
+                 mindimdiv=10, nbparts=4, deform_factor=1.,
+                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.01,
+                 use_pca=None, verbose=False):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.nbparts = nbparts
+        self.deform_factor = deform_factor
         self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
+        self.use_pca = use_pca
         self.verbose = verbose
 
-    def train(self, samples, labels):
+    def _train(self, fmaps, labels):
+        """ Training procedure which takes precomputed feature maps as inputs.
+            For efficiency purposes in grid search.
+        """
+        self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
         # Initialize the model with a warping classifier, taking
         # high energy subwindows as parts.
-        warp = MultiWarpClassifier(
+        warp = WarpClassifier(
             self.feature,
             self.mindimdiv,
             C=self.C,
-            lrimpl='llr',
-            verbose = self.verbose
+            learning_rate=self.learning_rate,
+            verbose=self.verbose
         )
-        warp.train(samples, labels)
+        warp._train(fmaps, labels)
         warpmaps = warp.model_featmaps
 
-        nb_classes = len(warpmaps)        
+        nb_classes = len(warpmaps)
         initdpms = []
         self.partsize = self.mindimdiv // 2
 
@@ -251,27 +162,8 @@ class MultiDPMClassifier:
                 _init_dpm(warpmaps[i], self.nbparts, self.partsize)
             )
 
-        # Compute feature maps.
-        fmaps, self.nbrowfeat, self.nbcolfeat = warped_fmaps_simple(
-            samples, self.mindimdiv, self.feature
-        )
-        nb_samples = len(samples)
-        nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
-        
-        # Put labels in 0..k-1 range.
-        self.labels_set = list(set(labels))
-        label_to_int = {}
-
-        for i in range(len(self.labels_set)):
-            label_to_int[self.labels_set[i]] = i
-
-        y = np.empty([nb_samples], dtype=np.int32)
-        
-        for i in range(nb_samples):
-            y[i] = label_to_int[labels[i]]
-
-        # Combine feature map and label in the samples.
-        samples = fmaps
+        nb_samples = len(fmaps)
+        nb_features = self.nbrowfeat * self.nbcolfeat * self.featdim
 
         # Train the DPMs using latent MLR
         dpmsize = initdpms[0].size() # All DPMs should have the same size.
@@ -282,41 +174,162 @@ class MultiDPMClassifier:
         for i in range(nb_classes):
             initmodel[:,i] = initdpms[i].tovector()
 
+        # Set the deformation factor to the user supplied value, scaled
+        # by 1 over the square leading feature map dimension to avoid
+        # feature scaling issues in the gradient descent.
+        square_lead_dim = np.max(fmaps[0].shape[0:2])**2
+        args = {
+            'size': dpmsize,
+            'df': float(self.deform_factor) / square_lead_dim
+        }
+
         self.lmlr = LatentMLR(
             self.C,
             _best_matches,
-            dpmsize,
+            args,
             initmodel,
             nb_coord_iter=self.nb_coord_iter,
             nb_gd_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
             verbose=self.verbose
         )
-        self.lmlr.fit(samples, y)
-       
-    def predict_proba(self, samples):
-        # Convert images to feature maps.
-        fmaps = map(lambda s: compute_featmap(
-            s, 
-            self.nbrowfeat, 
-            self.nbcolfeat, 
-            self.feature
-        ), samples)
+        self.lmlr.train(fmaps, labels)
+        # Save the DPMs for visualization purposes.
+        self.dpms = []
 
-        return self.lmlr.predict_proba(fmaps)
+        for i in range(self.lmlr.coef_.shape[1]):
+            self.dpms.append(
+                vectortodpm(self.lmlr.coef_[:,i], dpmsize)
+            )
+
+    def train(self, samples, labels):
+        # Compute feature maps.
+        if self.use_pca != None:
+            fmaps, newlabels, self.pca = random_windows_fmaps(
+                samples,
+                labels,
+                self.mindimdiv,
+                10,
+                self.feature,
+                size=0.7,
+                pca=self.use_pca
+            )
+            self._train(fmaps, newlabels)
+        else:
+            fmaps, newlabels = random_windows_fmaps(
+                samples,
+                labels,
+                self.mindimdiv,
+                10,
+                self.feature,
+                size=0.7,
+                pca=None
+            )
+            self._train(fmaps, newlabels)
+
+    def test_fmaps(self, samples):
+        nb_samples = len(samples)
+        if self.pca != None:
+            # Compute a data matrix without dimensionality reduction.
+            X = np.empty(
+                [nb_samples,
+                 self.nbrowfeat,
+                 self.nbcolfeat,
+                 self.feature.dimension],
+                dtype=theano.config.floatX
+            )
+            
+            for i in range(nb_samples):
+                X[i] = self.feature.compute_featmap(
+                    samples[i], self.nbrowfeat, self.nbcolfeat
+                )
+            # X is now a data matrix of feature maps, I want just a data mat
+            # of features to project.
+            X_feat = X.reshape(
+                [nb_samples * self.nbrowfeat * self.nbcolfeat, 
+                 self.feature.dimension]
+            )
+            # Project the features to the principal subspace.
+            X_feat_new = self.pca.transform(X_feat)
+            # Convert back to feature maps.
+            X_new = X_feat_new.reshape(
+                [nb_samples, self.nbrowfeat, self.nbcolfeat,
+                 self.pca.n_components]
+            )
+            # Convert it back to a feature maps representation.
+            fmaps = []
+            for i in range(nb_samples):
+                fmaps.append(X_new[i])
+            return fmaps
+        else:
+            fmaps = []
+            for sample in samples:
+                fmaps.append(self.feature.compute_featmap(
+                    sample, self.nbrowfeat, self.nbcolfeat
+                ))
+            return fmaps
+
+    def predict_proba(self, samples):
+        return self.lmlr.predict_proba(self.test_fmaps(samples))
+
+    def _predict(self, fmaps):
+        return self.lmlr.predict(fmaps)
 
     def predict(self, samples):
-        # Convert images to feature maps.
-        fmaps = map(lambda s: compute_featmap(
-            s, 
-            self.nbrowfeat, 
-            self.nbcolfeat, 
-            self.feature
-        ), samples)
-        intlabels = self.lmlr.predict(fmaps)
-        labels = []
+        return self._predict(self.test_fmaps(samples))
 
-        for i in range(len(samples)):
-            labels.append(self.labels_set[intlabels[i]])
+class DPMClassifier(BaseDPMClassifier, GridSearchMixin):
+    def train_gs_fast_named(self, samples, labels, k, **args):
+        self.int_to_label = list(set(labels))
+        label_to_int = {}
+        
+        for i in range(len(self.int_to_label)):
+            label_to_int[self.int_to_label[i]] = i
+        
+        int_labels = np.array(
+            map(lambda l: label_to_int[l], labels),
+            dtype=np.int32
+        )
 
-        return labels
+        return self.train_gs_fast(samples, int_labels, k, **args)
+
+
+    def train_gs_fast(self, samples, labels, k, C, feature, mindimdiv, 
+                      nbparts, deform_factor, learning_rate, nb_iter, 
+                      nb_coord_iter, nb_gd_iter, cachedir=None):
+        """ Fast grid search training procedure, using the warping classifier
+            to set the feature parameters (feature, mindimdiv) faster as a
+            first step, then use these parameters to set 
+            (nbparts, C, learning_rate) on the DPM classifier.
+        """
+        # Run GS on the warping classifier.
+        warp = WarpClassifier()
+        best_params_warp = warp.train_gs(
+            samples, 
+            labels,
+            k,
+            C=C, 
+            feature=feature,
+            mindimdiv=mindimdiv,
+            learning_rate=learning_rate,
+            nb_iter=nb_iter,
+            use_pca=[0.9],
+            verbose=[self.verbose]
+        )
+        best_feat = best_params_warp['feature']
+        best_mdd = best_params_warp['mindimdiv']
+        # Then on the DPM classifier, with fixed feature parameters.
+        return self.train_gs(
+            samples, 
+            labels, 
+            C=C,
+            feature=[best_feat],
+            mindimdiv=[best_mdd],
+            nbparts=nbparts,
+            deform_factor=deform_factor,
+            nb_coord_iter=nb_coord_iter,
+            nb_gd_iter=nb_gd_iter,
+            learning_rate=learning_rate,
+            use_pca=[0.9],
+            verbose=[self.verbose]
+        )

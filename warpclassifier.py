@@ -2,228 +2,156 @@
 """
 from sklearn.linear_model import LogisticRegression, SGDClassifier
 import numpy as np
+import theano
 
 import features as feat
-from latent_lr import BinaryLR
 from latent_mlr import MLR
 import lr
+from grid_search import GridSearchMixin
+from dataset_transform import random_windows_fmaps, left_right_flip
 
-class MultiWarpClassifier:
-    def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01,
-                 nb_iter=100, lrimpl='sklearn', verbose=False):
-        assert lrimpl in ['llr', 'sklearn']
+class BaseWarpClassifier:
+    def __init__(self, feature=feat.BGRHist((4,4,4),0), mindimdiv=10, 
+                 C=0.01, learning_rate=0.01, nb_iter=100, use_pca=False, 
+                 verbose=False):
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.C = C
         self.learning_rate = learning_rate
         self.nb_iter = nb_iter
-        self.lrimpl = lrimpl
+        self.use_pca = use_pca
         self.verbose = verbose
+        self.lr = None
+        self.model_featmaps = None
+        self.nbrowfeat = None
+        self.nbcolfeat = None
 
-    def train(self, samples, labels):
-        # Compute feature maps, performing dimensionality reduction on
-        # features while at it.
-        fmaps, self.nbrowfeat, self.nbcolfeat, pca = (
-            feat.warped_fmaps_dimred(
-                samples, self.mindimdiv, self.feature
-            )
+    def _train(self, fmaps, labels):
+        """ Training procedure which takes precomputed feature maps as
+            inputs. For efficiency purposes in grid search, and in the
+            DPM classifier.
+        """
+        self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+        fvecs = map(lambda f: f.flatten('C'), fmaps)
+
+        # Run multinomial logistic regression on it.
+        self.lr = MLR(
+            self.C,
+            nb_iter=self.nb_iter,
+            learning_rate=self.learning_rate,
+            verbose=self.verbose
         )
-        self.pca = pca
-        self.featdim = fmaps[0].shape[2]
-        if self.verbose:
-            print "Reduced feature dimension to " + repr(self.featdim)
-        nb_samples = len(samples)
-        nb_features = self.nbrowfeat * self.nbcolfeat * self.featdim
-        self.labels_set = list(set(labels))
-        label_to_int = {}
-
-        for i in range(len(self.labels_set)):
-            label_to_int[self.labels_set[i]] = i
-
-        X = np.empty([nb_samples, nb_features])
-        y = np.empty([nb_samples], dtype=np.int32)
-        
-        # Compute feature maps and int labels.
-        for i in range(nb_samples):
-            X[i] = fmaps[i].flatten('C')
-            y[i] = label_to_int[labels[i]]
-
-
-        if self.lrimpl == 'llr':
-            self.lr = MLR(
-                self.C,
-                nb_iter=self.nb_iter,
-                learning_rate=self.learning_rate,
-                verbose=self.verbose
-            )
-            self.lr.fit(X, y)
-        elif self.lrimpl == 'sklearn':
-            self.lr = LogisticRegression(
-                C=self.C
-            )
-            self.lr.fit(X, y)
+        self.lr.train(fvecs, labels)
 
         # Store the learned "feature map" for each class in its proper 
-        # shape, projected back into to the original space.
+        # shape.
         self.model_featmaps = []
 
+
         for i in range(self.lr.coef_.shape[1]):
-            self.model_featmaps.append(
-                self.lr.coef_[:,i].reshape(
-                    (self.nbrowfeat, self.nbcolfeat, self.featdim)
-                )
+            fmap = self.lr.coef_[:,i].reshape(
+                [self.nbrowfeat, self.nbcolfeat, self.featdim]
             )
+
+            self.model_featmaps.append(fmap)
+
+    def train(self, samples, labels):
+        # Compute feature maps.
+        if self.use_pca != None:
+            fmaps, newlabels, self.pca = random_windows_fmaps(
+                samples,
+                labels,
+                self.mindimdiv,
+                10,
+                self.feature,
+                size=0.7,
+                pca=self.use_pca
+            )
+            self._train(fmaps, newlabels)
+        else:
+            fmaps, newlabels = random_windows_fmaps(
+                samples,
+                labels,
+                self.mindimdiv,
+                10,
+                self.feature,
+                size=0.7,
+                pca=None
+            )
+            self._train(fmaps, newlabels)
 
     def predict_proba(self, samples):
+        nb_samples = len(samples)
         # Compute a data matrix without dimensionality reduction.
-        X = np.empty([
-            len(samples),
-            self.nbrowfeat * self.nbcolfeat * self.feature.dimension
-        ])
-
-        for i in range(len(samples)):
-            X[i] = feat.compute_featmap(
-                samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
-            ).flatten('C')
-        # Project the test data using PCA.
-        X_ = np.reshape(
-            self.pca.transform(
-                np.reshape(
-                    X, 
-                    [len(samples)*self.nbrowfeat*self.nbcolfeat, 
-                     self.feature.dimension]
-                )
-            ),
-            [len(samples), self.nbrowfeat*self.nbcolfeat*self.featdim]
+        X = np.empty(
+            [nb_samples,
+             self.nbrowfeat,
+             self.nbcolfeat,
+             self.feature.dimension],
+            dtype=theano.config.floatX
         )
-        
-        return self.lr.predict_proba(X_)
-
-    def predict(self, samples):
-        X = np.empty([
-            len(samples),
-            self.nbrowfeat * self.nbcolfeat * self.feature.dimension
-        ])
-
-        for i in range(len(samples)):
-            X[i] = feat.compute_featmap(
-                samples[i], self.nbrowfeat, self.nbcolfeat, self.feature
-            ).flatten('C')
-        # Project the test data using PCA.
-        X_ = np.reshape(
-            self.pca.transform(
-                np.reshape(
-                    X, 
-                    [len(samples)*self.nbrowfeat*self.nbcolfeat, 
-                     self.feature.dimension]
-                )
-            ),
-            [len(samples), self.nbrowfeat*self.nbcolfeat*self.featdim]
-        )
-
-        intlabels = self.lr.predict(X_)
-        labels = []
-
-        for i in range(len(samples)):
-            labels.append(self.labels_set[intlabels[i]])
-
-        return labels
-
-class WarpClassifier:
-    def __init__(self, feature, mindimdiv, C=0.01, learning_rate=0.01, 
-                 nbiter=1000, batch_size=5, verbose=False, lrimpl='sklearn'):
-        """ Initialize the classifier.
-        
-        Arguments:
-            feature    feature to use for feature maps. Should be an instance
-                       of features.Feature.
-            mindimdiv  the number of divisions of the minimum dimension for
-                       feature map computations.
-            C          logistic regression soft-margin parameter.
-        """
-        assert lrimpl in ['llr', 'sklearn', 'theano']
-        self.feature = feature
-        self.mindimdiv = mindimdiv
-        self.C = C
-        self.verbose = verbose
-        self.lrimpl = lrimpl
-        self.learning_rate=learning_rate
-        self.nbiter = nbiter
-        self.batch_size = batch_size
-
-    def train(self, positives, negatives):
-        """ Trains the classifier given examples of a positive image to
-            recognize and negative examples.
-        
-        Arguments:
-            positives    list of positive images to recognize.
-            negatives    list of negative images.
-        """
-        # Warp all the training samples to flattened
-        # feature maps.
-        posmaps, negmaps, self.nbrowfeat, self.nbcolfeat = feat.warped_fmaps(
-            positives, negatives, self.mindimdiv, self.feature
-        )
-        nb_samples = len(positives) + len(negatives)
-        nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
-        X = np.empty([nb_samples, nb_features])
-        y = np.empty([nb_samples])
-        i = 0
-
-        for pos in posmaps:
-            X[i,:] = pos.flatten('C')
-            y[i] = 1
-            i += 1
-        for neg in negmaps:
-            X[i,:] = neg.flatten('C')
-            y[i] = -1
-            i += 1
-        
-        if self.lrimpl == 'llr':
-            self.logregr = BinaryLR(verbose=self.verbose)
-            self.logregr.fit(X, y, nb_iter=self.nbiter, learning_rate=self.learning_rate, C=self.C)
-        elif self.lrimpl == 'theano':
-            self.logregr = lr.LogisticRegression(
-                self.C, 
-                verbose=self.verbose)
-            self.logregr.fit(X, y, nb_iter=self.nbiter, learning_rate=self.learning_rate, batch_size=self.batch_size)
-        elif self.lrimpl == 'sklearn':
-            self.logregr = LogisticRegression(
-                penalty='l2',
-                C=self.C,
-                fit_intercept=True,
-                dual=False
-            )
-            self.logregr.fit(X, y)
-        # Save the (well shaped) feature map infered by logistic regression.
-        self.model_featmap = self.logregr.coef_.reshape(
-            (self.nbrowfeat, self.nbcolfeat, self.feature.dimension)
-        )
-
-    def predict_proba(self, images):
-        """ Predicts the probability of images to be classified as
-            positive by our classifier.
-
-        Arguments:
-            images    list of images.
-        
-        Returns:
-            len(images) dimensional numpy vector containing probability
-            estimates for each image, in the order they were inputted in.
-        """
-        # Check training has been performed
-        assert self.logregr != None
-        # Warp the images to flattened feature maps.
-        nb_samples = len(images)
-        nb_features = self.nbrowfeat * self.nbcolfeat * self.feature.dimension
-        X = np.empty([nb_samples, nb_features])
 
         for i in range(nb_samples):
-            featmap = feat.compute_featmap(images[i], self.nbrowfeat, 
-                                           self.nbcolfeat, self.feature)
-            X[i,:] = featmap.flatten('C')
-        # Run logistic regression probability estimates.
-        if self.lrimpl in ['llr', 'theano']:
-            return self.logregr.predict_proba(X)
-        elif self.lrimpl == 'sklearn':
-            return self.logregr.predict_proba(X)[:,1]
+            X[i] = self.feature.compute_featmap(
+                samples[i], self.nbrowfeat, self.nbcolfeat
+            )
+        # X is now a data matrix of feature maps, I want just a data matrix
+        # of features to project.
+        X_feat = X.reshape(
+            [nb_samples * self.nbrowfeat * self.nbcolfeat, 
+             self.feature.dimension]
+        )
+        # Project the features to the principal subspace.
+        X_feat_new = self.pca.transform(X_feat)
+        # Convert back to feature maps.
+        X_new = X_feat_new.reshape(
+            [nb_samples, self.nbrowfeat * self.nbcolfeat *
+             self.pca.n_components]
+        )
+        # Convert it back to a feature maps representation.
+        fmaps = []
+        for i in range(nb_samples):
+            fmaps.append(X_new[i])
+
+        return self.lr.predict_proba(fmaps)
+
+    def _predict(self, fmaps):
+        return self.lr.predict(fmaps)
+
+    def predict(self, samples):
+        nb_samples = len(samples)
+        # Compute a data matrix without dimensionality reduction.
+        X = np.empty(
+            [nb_samples,
+             self.nbrowfeat,
+             self.nbcolfeat,
+             self.feature.dimension],
+            dtype=theano.config.floatX
+        )
+
+        for i in range(nb_samples):
+            X[i] = self.feature.compute_featmap(
+                samples[i], self.nbrowfeat, self.nbcolfeat
+            )
+        # X is now a data matrix of feature maps, I want just a data matrix
+        # of features to project.
+        X_feat = X.reshape(
+            [nb_samples * self.nbrowfeat * self.nbcolfeat, 
+             self.feature.dimension]
+        )
+        # Project the features to the principal subspace.
+        X_feat_new = self.pca.transform(X_feat)
+        # Convert back to feature maps.
+        X_new = X_feat_new.reshape(
+            [nb_samples, self.nbrowfeat * self.nbcolfeat *
+             self.pca.n_components]
+        )
+        # Convert it back to a feature maps representation.
+        fmaps = []
+        for i in range(nb_samples):
+            fmaps.append(X_new[i])
+
+        return self._predict(fmaps)
+
+class WarpClassifier(BaseWarpClassifier, GridSearchMixin):
+    pass

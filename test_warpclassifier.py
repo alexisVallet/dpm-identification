@@ -1,14 +1,11 @@
-""" Unit tests for the WarpClassifier class.
+""" Unit tests for the MultiWarpClassifier class.
 """
-import numpy as np
-import cv2
 import unittest
-from sklearn.metrics import roc_curve, roc_auc_score
-import matplotlib.pyplot as plt
+import numpy as np
 
-from ioutils import load_data
 from warpclassifier import WarpClassifier
-from features import Feature
+from ioutils import load_data
+from features import Combine, BGRHist, HoG
 
 class TestWarpClassifier(unittest.TestCase):
     @classmethod
@@ -33,37 +30,63 @@ class TestWarpClassifier(unittest.TestCase):
                     cls.traindata[label] += folddata[label]
 
     def test_classifier(self):
-        nbbins = (4,4,4)
-        feature = Feature('bgrhist', np.prod(nbbins), nbbins)
-        mindimdiv = 7
-        classifier = WarpClassifier(feature, 7, verbose=True, lrimpl='llr')
-        label = 'asuka_langley'
-        negatives = reduce(lambda l1,l2:l1+l2,
-                           [self.traindata[l] for l in self.traindata
-                            if l != label])
-        print "training classifier..."
-        classifier.train(self.traindata[label], negatives)
-        cv2.namedWindow('learned fmap', cv2.WINDOW_NORMAL)
-        cv2.imshow('learned fmap', feature.vis_featmap(classifier.model_featmap))
-        cv2.waitKey(0)
-        print "predicting..."
-        labels = []
-        testimages = []
-
+        """ Tests one vs all classification.
+        """
+        # Prepare training data.
+        trainsamples = []
+        trainlabels = []
+        
         for l in self.traindata:
-            for image in self.traindata[l]:
-                labels.append(l)
-                testimages.append(image)
+            for s in self.traindata[l]:
+                trainsamples.append(s)
+                trainlabels.append(l)
+        
+        # Run training.
+        nbbins = (4,4,4)
+        feature = Combine(
+            HoG(9, 1),
+            BGRHist(nbbins, 0)
+        )
+        mindimdiv = 10
+        C = 0.1
+        classifier = WarpClassifier(
+            feature,
+            mindimdiv,
+            C,
+            learning_rate=0.001,
+            nb_iter=100,
+            verbose=True,
+            use_pca=0.9
+        )
 
-        probas = classifier.predict_proba(testimages)
-        print "computing ROC curve..."
-        binlabels = np.empty([len(testimages)], np.int32)
-        for i in range(len(labels)):
-            binlabels[i] = 1 if labels[i] == label else 0
-        fpr, tpr, thresh = roc_curve(binlabels, probas)
-        print "AUC = " + repr(roc_auc_score(binlabels, probas))
-        plt.plot(fpr, tpr)
-        plt.show()
+        trainsamples = []
+        trainlabels = []
+        
+        for k in self.traindata:
+            for s in self.traindata[k]:
+                trainsamples.append(s)
+                trainlabels.append(k)
+
+        classifier.train_named(trainsamples, trainlabels)
+
+        testsamples = []
+        expected = []
+
+        for k in self.testdata:
+            for s in self.testdata[k]:
+                testsamples.append(s)
+                expected.append(k)
+
+        predicted = classifier.predict_named(testsamples)
+        print expected
+        print predicted
+        correct = 0
+        
+        for i in range(len(predicted)):
+            if predicted[i] == expected[i]:
+                correct += 1
+
+        print "Recognition rate: " + repr(float(correct) / len(predicted))
 
 if __name__ == "__main__":
     unittest.main()
