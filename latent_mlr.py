@@ -9,27 +9,30 @@ from grid_search import GridSearchMixin
 
 class BaseLatentMLR:
     def __init__(self, C, latent_function, latent_args, initbeta,
-                 nb_coord_iter=1, nb_gd_iter=100, learning_rate=0.01,
-                 verbose=False):
+                 nb_coord_iter=1, nb_gd_iter=100, opt='gd', learning_rate=0.0001,
+                 inc_rate=1.2, dec_rate=0.5, verbose=False):
+        assert opt in ['gd', 'rprop']
         # Basic parameters.
         self.C = C
         self.latent_function = latent_function
         self.latent_args = latent_args
         self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
+        self.opt = opt
         self.learning_rate = learning_rate
+        self.dec_rate = dec_rate
+        self.inc_rate = inc_rate
         self.verbose = verbose
 
         # Theano shared variables and model information.
         self.nb_features, self.nb_classes = initbeta.shape
         self.beta = theano.shared(
-            initbeta.astype(theano.config.floatX),
+            np.concatenate(
+                (np.zeros((1, self.nb_classes), theano.config.floatX),
+                 initbeta.astype(theano.config.floatX)),
+                axis=0
+            ),
             name='beta',
-            borrow=True
-        )
-        self.b = theano.shared(
-            np.zeros((self.nb_classes,), dtype=theano.config.floatX),
-            name='b',
             borrow=True
         )
         # Compile common theano functions.
@@ -40,31 +43,21 @@ class BaseLatentMLR:
             'C': self.C,
             'latfunc': self.latent_function,
             'latargs': self.latent_args,
-            'nb_coord_iter': self.nb_coord_iter,
-            'nb_gd_iter': self.nb_gd_iter,
-            'learning_rate': self.learning_rate,
             'nb_features': self.nb_features,
             'nb_classes': self.nb_classes,
-            'beta': self.beta.get_value(),
-            'b': self.b.get_value()
+            'beta': self.beta.get_value()
         }
 
     def __setstate__(self, params):
         self.C = params['C']
         self.latent_function = params['latfunc']
         self.latent_args = params['latargs']
-        self.nb_coord_iter = params['nb_coord_iter']
-        self.nb_gd_iter = params['nb_gd_iter']
-        self.learning_rate = params['learning_rate']
         self.nb_features = params['nb_features']
         self.nb_classes = params['nb_classes']
         self.beta = theano.shared(
             params['beta'],
-            name='beta'
-        )
-        self.b = theano.shared(
-            params['b'],
-            name='b'
+            name='beta',
+            borrow=True
         )
         self.compile_funcs()
 
@@ -76,8 +69,8 @@ class BaseLatentMLR:
         # batched_dot function to compute all the scores in one go.
         test_lat = T.tensor3('test_lat')
         predict_proba_sym = (
-            T.nnet.softmax(T.batched_dot(test_lat, self.beta.T).T 
-                           + self.b)
+            T.nnet.softmax(T.batched_dot(test_lat, self.beta[1:,:].T).T 
+                           + self.beta[0,:])
         )
         self._predict_proba = theano.function(
             [test_lat],
@@ -108,39 +101,44 @@ class BaseLatentMLR:
         )
         # Cost function.
         regularization = (
-            0.5 * (T.dot(T.flatten(self.beta), T.flatten(self.beta)) 
-                   + T.dot(T.flatten(self.b), T.flatten(self.b)))
+            0.5 * T.dot(T.flatten(self.beta), T.flatten(self.beta))
         )
         
-        posdot = (T.dot(lat_pos, self.beta) + self.b)[
+        posdot = (T.dot(lat_pos, self.beta[1:,:]) + self.beta[0,:])[
             T.arange(nb_samples), 
             labels
         ]
         losses = T.log(
             T.exp(posdot) /
             T.reshape(
-                T.exp(T.dot(lat_neg, self.beta) + self.b).sum(axis=1,
-                                                              keepdims=True),
+                T.exp(T.dot(lat_neg, self.beta[1:,:]) + self.beta[0,:]).sum(
+                    axis=1,
+                    keepdims=True
+                ),
                 (nb_samples,))
         )
         cost = (
             regularization - self.C * T.sum(losses)
         )
+        if self.opt == 'gd':
+            self.train_gd(samples, labels, cost, lat_pos, lat_neg)
+        elif self.opt == 'rprop':
+            self.train_rprop(samples, labels, cost, lat_pos, lat_neg)
+
+    def train_gd(self, samples, labels, cost, lat_pos, lat_neg):
+        nb_samples = len(samples)
         # Gradients.
         grad_beta = T.grad(cost, self.beta)
-        grad_b = T.grad(cost, self.b)
         updates = [
             (self.beta, self.beta - self.learning_rate * grad_beta),
-            (self.b, self.b - self.learning_rate * grad_b)
         ]
         # Theano function to compute cost and gradient norm while
         # updating the model at the same time.
         grad_descent = theano.function(
             inputs=[],
             outputs=[cost, 
-                     T.sqrt(T.dot(T.flatten(grad_beta), T.flatten(grad_beta))
-                            + T.dot(T.flatten(grad_b), T.flatten(grad_b)))],
-            updates=updates            
+                     T.sqrt(T.dot(T.flatten(grad_beta), T.flatten(grad_beta)))],
+            updates=updates
         )
         new_lat_pos = np.empty(
             [nb_samples, self.nb_features],
@@ -160,17 +158,17 @@ class BaseLatentMLR:
         for t_coord in range(self.nb_coord_iter):
             # Compute the best positive latent vectors.
             new_lat_pos = self.latent_function(
-                self.beta.get_value(),
+                self.beta.get_value()[1:,:],
                 samples,
                 labels,
                 self.latent_args
             )
             lat_pos.set_value(new_lat_pos)
-            
+
             for t_gd in range(self.nb_gd_iter):
                 # Compute the best negative latent vectors.
                 new_lat_neg = self.latent_function(
-                    self.beta.get_value(),
+                    self.beta.get_value()[1:,:],
                     samples,
                     labels,
                     self.latent_args
@@ -179,28 +177,124 @@ class BaseLatentMLR:
                 cost, gradnorm = grad_descent()
 
                 if bestcost == None or cost < bestcost:
-                    bestmodel = (
-                        np.array(self.beta.get_value(), copy=True),
-                        np.array(self.b.get_value(), copy=True)
-                    )
+                    bestmodel = np.array(self.beta.get_value(), copy=True)
                     bestcost = cost
                 
                 if self.verbose:
                     print "Epoch " + repr(t_gd + 1)
                     print "Cost: " + repr(cost)
                     print "Gradient norm: " + repr(gradnorm)
-        bestbeta, bestb = bestmodel
-        self.b.set_value(bestb)
-        self.beta.set_value(bestbeta)
-        self.intercept_ = self.b.get_value()
-        self.coef_ = self.beta.get_value()
+        self.beta.set_value(bestmodel)
+        self.intercept_ = bestmodel[0,:]
+        self.coef_ = bestmodel[1:,:]
+
+    def train_rprop(self, samples, labels, cost_sym, lat_pos, lat_neg):
+        nb_samples = len(samples)
+        weights_shape = self.beta.get_value().shape
+        nb_weights = np.prod(weights_shape)
+        # Keep step for each weight into a shared theano vector.
+        steps = theano.shared(
+            np.array(
+                [self.learning_rate] * nb_weights,
+                theano.config.floatX
+            ).reshape(weights_shape),
+            name='steps'
+        )
+        # Gradient of the cost function.
+        grad = T.grad(cost_sym, self.beta)
+        grad_f = theano.function(
+            [],
+            grad
+        )
+        # Perform the first iteration "manually", to initialize prev_grad properly.
+        init_grad = grad_f()
+        self.beta.set_value(self.beta.get_value() - steps.get_value() * init_grad)
+        # Keep the gradient from the previous iteration into another shared theano
+        # vector.
+        prev_grad = theano.shared(
+            init_grad,
+            name='g(t-1)'
+        )
+        # Update rules for RPROP, scaling weight-wise step up when gradient signs 
+        # agree, down when they disagree.
+        # Vector containing 0 if the sign of the gradients disagree, 1 otherwise.
+        sign_idx = T.iround((T.sgn(prev_grad * grad) + 1.)/2.).flatten()
+        # Using the previously defined indices, we index into a matrix to get the 
+        # new step vector.
+        new_steps = T.stack(
+            self.dec_rate * steps.flatten(), self.inc_rate * steps.flatten()
+        )[sign_idx, T.arange(nb_weights)].reshape(weights_shape)
+        # Specifies the updates at each iteration. We update the steps, the 
+        # gradient from the previous iteration, and the actual descent.
+        updates = [
+            (steps, new_steps),
+            (prev_grad, grad),
+            (self.beta, self.beta - steps * grad)
+        ]
+        # Full theano rprop function. Outputs the cost and gradient norm at the 
+        # current point, and updates all the variables accordingly.
+        rprop_descent = theano.function(
+            [],
+            [cost_sym, grad.norm(2)],
+            updates=updates
+        )
+        new_lat_pos = np.empty(
+            [nb_samples, self.nb_features],
+            dtype=theano.config.floatX
+        )
+        new_lat_neg = np.empty(
+            [nb_samples, self.nb_features],
+            dtype=theano.config.floatX
+        )
+        bestmodel = np.empty(
+            [self.nb_features, self.nb_classes],
+            dtype=theano.config.floatX
+        )
+        bestcost = None
+        eps = 10E-3
+        
+        # Running the usual coordinate descent.
+        for t_coord in range(self.nb_coord_iter):
+            # Compute the best positive latent vectors.
+            new_lat_pos = self.latent_function(
+                self.beta.get_value()[1:,:],
+                samples,
+                labels,
+                self.latent_args
+            )
+            lat_pos.set_value(new_lat_pos)
+            # Actual descent, stopping after a given number of iterations or when the
+            # gradient norm is close to zero.
+            for t_gd in range(self.nb_gd_iter):
+                # Compute the best negative latent vectors.
+                new_lat_neg = self.latent_function(
+                    self.beta.get_value()[1:,:],
+                    samples,
+                    labels,
+                    self.latent_args
+                )
+                lat_neg.set_value(new_lat_neg)
+                cost_val, grad_norm = rprop_descent()
+                if bestcost == None or cost_val < bestcost:
+                    bestmodel = np.array(self.beta.get_value(), copy=True)
+                    bestcost = cost_val
+                if self.verbose:
+                    print "Epoch " + repr(t_gd + 1)
+                    print "Cost: " + repr(cost_val)
+                    print "Gradient norm: " + repr(grad_norm)
+                    print "Mean step size: " + repr(steps.get_value().mean())
+                if grad_norm <= eps:
+                    break
+        self.beta.set_value(bestmodel)
+        self.intercept_ = bestmodel[0,:]
+        self.coef_ = bestmodel[1:,:]
 
     def predict_proba(self, samples):
         nb_samples = len(samples)
         beta_value = self.beta.get_value()
-        nb_features, nb_classes = beta_value.shape
+        nb_featuresp1, nb_classes = beta_value.shape
         test_latents = np.empty(
-            [nb_classes, nb_samples, nb_features],
+            [nb_classes, nb_samples, nb_featuresp1 - 1],
             dtype=theano.config.floatX
         )
 
@@ -208,7 +302,7 @@ class BaseLatentMLR:
         # 3D tensor.
         for l in range(nb_classes):
             test_latents[l] = self.latent_function(
-                beta_value,
+                beta_value[1:,:],
                 samples,
                 np.repeat([l], nb_samples),
                 self.latent_args
@@ -220,9 +314,9 @@ class BaseLatentMLR:
     def predict(self, samples):
         nb_samples = len(samples)
         beta_value = self.beta.get_value()
-        nb_features, nb_classes = beta_value.shape
+        nb_featuresp1, nb_classes = beta_value.shape
         test_latents = np.empty(
-            [nb_classes, nb_samples, nb_features],
+            [nb_classes, nb_samples, nb_featuresp1 - 1],
             dtype=theano.config.floatX
         )
 
@@ -230,7 +324,7 @@ class BaseLatentMLR:
         # 3D tensor.
         for l in range(nb_classes):
             test_latents[l] = self.latent_function(
-                beta_value,
+                beta_value[1:,:],
                 samples,
                 np.repeat([l], nb_samples),
                 self.latent_args
@@ -248,10 +342,14 @@ class BaseMLR:
     """ Implementation of non-latent multinomial logistic regression based
         on latent MLR.
     """
-    def __init__(self, C=0.1, nb_iter=100, learning_rate=0.001, verbose=False):
+    def __init__(self, C=0.1, nb_iter=100, opt='gd', learning_rate=0.001, 
+                 inc_rate=1.2, dec_rate=0.5, verbose=False):
         self.C = C
         self.nb_iter = nb_iter
+        self.opt = opt
         self.learning_rate = learning_rate
+        self.inc_rate = inc_rate
+        self.dec_rate = dec_rate
         self.verbose = verbose
         
     def train(self, samples, labels):
@@ -264,8 +362,11 @@ class BaseMLR:
                                   dtype=theano.config.floatX
                               ), 
                               nb_coord_iter=1,
-                              nb_gd_iter=self.nb_iter, 
+                              nb_gd_iter=self.nb_iter,
+                              opt=self.opt,
                               learning_rate=self.learning_rate,
+                              inc_rate=self.inc_rate,
+                              dec_rate=self.dec_rate,
                               verbose=self.verbose)
         self.lmlr.train(samples, labels)
         self.intercept_ = self.lmlr.intercept_

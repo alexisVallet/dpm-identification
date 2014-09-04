@@ -40,8 +40,8 @@ class TestDPMClassifier(unittest.TestCase):
             BGRHist(nbb, 0),
             HoG(nbo, 1)
         ) for nbb in nbbins for nbo in nb_orient]
-        mindimdiv = [5, 10, 20]
-        C = [10., 1., 0.1, 0.01]
+        mindimdiv = [5, 10, 15]
+        C = [1., 0.1, 0.01]
         nbparts = [2, 4, 8]
         deform_factor = [1.]
         learning_rate=[0.01, 0.001, 0.0001]

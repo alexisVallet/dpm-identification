@@ -48,13 +48,15 @@ class TestWarpClassifier(unittest.TestCase):
             BGRHist(nbbins, 0)
         )
         mindimdiv = 10
-        C = 0.1
+        C = 0.01
         classifier = WarpClassifier(
             feature,
             mindimdiv,
             C,
             learning_rate=0.001,
             nb_iter=100,
+            inc_rate=1.2,
+            dec_rate=0.5,
             verbose=True,
             use_pca=0.9
         )

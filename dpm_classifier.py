@@ -123,13 +123,16 @@ class BaseDPMClassifier:
     """
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
                  mindimdiv=10, nbparts=4, deform_factor=1.,
-                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.01,
-                 use_pca=None, verbose=False):
+                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.001, opt='rprop',
+                 inc_rate=1.2, dec_rate=0.5, use_pca=None, verbose=False):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.nbparts = nbparts
         self.deform_factor = deform_factor
+        self.opt = opt
+        self.inc_rate = inc_rate
+        self.dec_rate = dec_rate
         self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
@@ -147,7 +150,10 @@ class BaseDPMClassifier:
             self.feature,
             self.mindimdiv,
             C=self.C,
+            opt=self.opt,
             learning_rate=self.learning_rate,
+            inc_rate=self.inc_rate,
+            dec_rate=self.dec_rate,
             verbose=self.verbose
         )
         warp._train(fmaps, labels)
@@ -188,9 +194,12 @@ class BaseDPMClassifier:
             _best_matches,
             args,
             initmodel,
+            opt=self.opt,
             nb_coord_iter=self.nb_coord_iter,
             nb_gd_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
+            inc_rate=self.inc_rate,
+            dec_rate=self.dec_rate,
             verbose=self.verbose
         )
         self.lmlr.train(fmaps, labels)

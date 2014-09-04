@@ -12,13 +12,16 @@ from dataset_transform import random_windows_fmaps, left_right_flip
 
 class BaseWarpClassifier:
     def __init__(self, feature=feat.BGRHist((4,4,4),0), mindimdiv=10, 
-                 C=0.01, learning_rate=0.01, nb_iter=100, use_pca=False, 
-                 verbose=False):
+                 C=0.01, opt='rprop', learning_rate=0.001, nb_iter=100, inc_rate=1.2, 
+                 dec_rate=0.5, use_pca=False, verbose=False):
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.C = C
+        self.opt = opt
         self.learning_rate = learning_rate
         self.nb_iter = nb_iter
+        self.inc_rate = inc_rate
+        self.dec_rate = dec_rate
         self.use_pca = use_pca
         self.verbose = verbose
         self.lr = None
@@ -38,7 +41,10 @@ class BaseWarpClassifier:
         self.lr = MLR(
             self.C,
             nb_iter=self.nb_iter,
+            opt=self.opt,
             learning_rate=self.learning_rate,
+            inc_rate=self.inc_rate,
+            dec_rate=self.dec_rate,
             verbose=self.verbose
         )
         self.lr.train(fvecs, labels)

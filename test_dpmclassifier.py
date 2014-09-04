@@ -37,7 +37,7 @@ class TestDPMClassifier(unittest.TestCase):
             HoG(9,1)
         )
         mindimdiv = 10
-        C = 0.1
+        C = 0.01
         nbparts = 4
         deform_factor = 1.
         classifier = DPMClassifier(
@@ -48,7 +48,10 @@ class TestDPMClassifier(unittest.TestCase):
             deform_factor,
             nb_coord_iter=4,
             nb_gd_iter=25,
+            opt='rprop',
             learning_rate=0.001,
+            inc_rate=1.2,
+            dec_rate=0.5,
             use_pca=0.9,
             verbose=True
         )
@@ -86,17 +89,20 @@ class TestDPMClassifier(unittest.TestCase):
             for s in self.testdata[k]:
                 testsamples.append(s)
                 expected.append(k)
-
-        predicted = classifier.predict_named(testsamples)
-        print expected
-        print predicted
-        correct = 0
+        probas = classifier.predict_proba(testsamples)
+        nb_classes = probas.shape[1]
         
-        for i in range(len(predicted)):
-            if predicted[i] == expected[i]:
-                correct += 1
+        for top in range(1, 21):
+            nb_correct = 0
 
-        print "Recognition rate: " + repr(float(correct) / len(predicted))
+            for i in range(len(testsamples)):
+                top_idx = np.argsort(probas[i,:])[nb_classes-top:].tolist()
+                top_names = map(lambda i: classifier.int_to_label[i], top_idx)
+
+                if expected[i] in top_names:
+                    nb_correct += 1
+
+            print "top " + repr(top) + " recognition rate: " + repr(float(nb_correct)/len(testsamples))
 
 if __name__ == "__main__":
     unittest.main()
