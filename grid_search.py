@@ -23,21 +23,9 @@ class GridSearchMixin:
             self.predict(samples).tolist()
         )
 
-    def train_named(self, samples, labels):
-        self.int_to_label = list(set(labels))
-        label_to_int = {}
-        
-        for i in range(len(self.int_to_label)):
-            label_to_int[self.int_to_label[i]] = i
-        
-        int_labels = np.array(
-            map(lambda l: label_to_int[l], labels),
-            dtype=np.int32
-        )
-        self.train(samples, int_labels)
-
-    def train_gs_named(self, samples, labels, k, **args):
-        """ Trains a classifier with grid search using named labels.
+    def name_to_int(self, labels):
+        """ Converts a collection of string labels to integer labels, storing
+            the correspondance in the self.int_to_label list.
         """
         self.int_to_label = list(set(labels))
         label_to_int = {}
@@ -49,7 +37,16 @@ class GridSearchMixin:
             map(lambda l: label_to_int[l], labels),
             dtype=np.int32
         )
-        return self.train_gs(samples, int_labels, k, **args)
+
+        return int_labels
+
+    def train_named(self, samples, labels):
+        self.train(samples, self.name_to_int(labels))
+
+    def train_gs_named(self, samples, labels, k, **args):
+        """ Trains a classifier with grid search using named labels.
+        """
+        return self.train_gs(samples, self.name_to_int(labels), k, **args)
 
     def _train_gs(self, shflsamples, shfllabels, k, **args):
         # Iterate over all combinations of parameters, find the best.
@@ -145,3 +142,61 @@ class GridSearchMixin:
         self.__init__(best_params)
         self.train(samples, labels)
         return best_params
+
+    def train_validation(self, samples, labels, valid_size=0.2):
+        """ Trains the classifier, picking a random validation set out of the training
+            data.
+
+        Arguments:
+            samples
+                full training set of samples.
+            labels
+                labels for the training samples.
+            valid_size
+                fraction of the samples of each class in the dataset to pick. This is
+                not simply picking a random subset of the samples, as we still would
+                like each class to be represented equally - and by at least one sample.
+        """
+        nb_samples = len(samples)
+        nb_classes = np.unique(labels).size
+        assert nb_samples >= 2 * nb_classes
+        # Group the samples per class.
+        samples_per_class = []
+        for i in range(nb_classes):
+            samples_per_class.append([])
+        for i in range(nb_samples):
+            samples_per_class[labels[i]].append(samples[i])
+        # For each class, split into training and validation sets.
+        train_samples = []
+        train_labels = []
+        valid_samples = []
+        valid_labels = []
+        for i in range(nb_classes):
+            # We need at least one validation sample and one training sample.
+            nb_samples_class = len(samples_per_class[i])
+            assert nb_samples_class >= 2
+            nb_valid = min(
+                nb_samples_class - 1,
+                max(1, 
+                    int(round(valid_size * nb_samples_class))
+                )
+            )
+            nb_train = nb_samples_class - nb_valid
+            # Pick the sets randomly.
+            shflidxs = np.random.permutation(nb_samples_class)
+            j = 0
+            for k in range(nb_valid):
+                valid_samples.append(samples_per_class[i][shflidxs[j]])
+                valid_labels.append(i)
+                j += 1
+            for k in range(nb_train):
+                train_samples.append(samples_per_class[i][shflidxs[j]])
+                train_labels.append(i)
+                j += 1
+        # Run the actual training.
+        self.train(train_samples, np.array(train_labels, np.int32),
+                   valid_samples, np.array(valid_labels, np.int32))
+
+    def train_validation_named(self, samples, labels, valid_size=0.2):
+        self.train_validation(samples, self.name_to_int(labels), valid_size)
+

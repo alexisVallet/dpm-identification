@@ -48,7 +48,6 @@ class TestDPMClassifier(unittest.TestCase):
             deform_factor,
             nb_coord_iter=4,
             nb_gd_iter=25,
-            opt='rprop',
             learning_rate=0.001,
             inc_rate=1.2,
             dec_rate=0.5,
@@ -67,7 +66,7 @@ class TestDPMClassifier(unittest.TestCase):
         print "Training..."
         cachename = 'data/dpmid-cache/test'
         if not os.path.isfile(cachename):
-            classifier.train_named(trainsamples, trainlabels)
+            classifier.train_validation_named(trainsamples, trainlabels)
             cachefile = open(cachename, 'w')
             pickle.dump(classifier, cachefile)
             cachefile.close()

@@ -123,14 +123,13 @@ class BaseDPMClassifier:
     """
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
                  mindimdiv=10, nbparts=4, deform_factor=1.,
-                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.001, opt='rprop',
+                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.001,
                  inc_rate=1.2, dec_rate=0.5, use_pca=None, verbose=False):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.nbparts = nbparts
         self.deform_factor = deform_factor
-        self.opt = opt
         self.inc_rate = inc_rate
         self.dec_rate = dec_rate
         self.nb_coord_iter = nb_coord_iter
@@ -139,24 +138,22 @@ class BaseDPMClassifier:
         self.use_pca = use_pca
         self.verbose = verbose
 
-    def _train(self, fmaps, labels):
+    def _train(self, fmaps, labels, valid_fmaps=[], valid_labels=None):
         """ Training procedure which takes precomputed feature maps as inputs.
             For efficiency purposes in grid search.
         """
-        self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
         # Initialize the model with a warping classifier, taking
         # high energy subwindows as parts.
         warp = WarpClassifier(
             self.feature,
             self.mindimdiv,
             C=self.C,
-            opt=self.opt,
             learning_rate=self.learning_rate,
             inc_rate=self.inc_rate,
             dec_rate=self.dec_rate,
             verbose=self.verbose
         )
-        warp._train(fmaps, labels)
+        warp._train(fmaps, labels, valid_fmaps, valid_labels)
         warpmaps = warp.model_featmaps
 
         nb_classes = len(warpmaps)
@@ -194,7 +191,6 @@ class BaseDPMClassifier:
             _best_matches,
             args,
             initmodel,
-            opt=self.opt,
             nb_coord_iter=self.nb_coord_iter,
             nb_gd_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
@@ -202,7 +198,7 @@ class BaseDPMClassifier:
             dec_rate=self.dec_rate,
             verbose=self.verbose
         )
-        self.lmlr.train(fmaps, labels)
+        self.lmlr.train(fmaps, labels, valid_fmaps, valid_labels)
         # Save the DPMs for visualization purposes.
         self.dpms = []
 
@@ -211,7 +207,7 @@ class BaseDPMClassifier:
                 vectortodpm(self.lmlr.coef_[:,i], dpmsize)
             )
 
-    def train(self, samples, labels):
+    def train(self, samples, labels, valid_samples=[], valid_labels=None):
         # Compute feature maps.
         if self.use_pca != None:
             fmaps, newlabels, self.pca = random_windows_fmaps(
@@ -223,7 +219,11 @@ class BaseDPMClassifier:
                 size=0.7,
                 pca=self.use_pca
             )
-            self._train(fmaps, newlabels)
+            self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+            valid_fmaps = []
+            if valid_labels != None or valid_samples == []:
+                valid_fmaps = self.test_fmaps(valid_samples)
+            self._train(fmaps, newlabels, valid_fmaps, valid_labels)
         else:
             fmaps, newlabels = random_windows_fmaps(
                 samples,
@@ -234,7 +234,11 @@ class BaseDPMClassifier:
                 size=0.7,
                 pca=None
             )
-            self._train(fmaps, newlabels)
+            self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+            valid_fmaps = []
+            if valid_labels != None or valid_samples == []:
+                valid_fmaps = self.test_fmaps(valid_samples)
+            self._train(fmaps, newlabels, valid_fmaps, valid_labels)
 
     def test_fmaps(self, samples):
         nb_samples = len(samples)
@@ -281,11 +285,8 @@ class BaseDPMClassifier:
     def predict_proba(self, samples):
         return self.lmlr.predict_proba(self.test_fmaps(samples))
 
-    def _predict(self, fmaps):
-        return self.lmlr.predict(fmaps)
-
     def predict(self, samples):
-        return self._predict(self.test_fmaps(samples))
+        return self.lmlr.predict(self.test_fmaps(samples))
 
 class DPMClassifier(BaseDPMClassifier, GridSearchMixin):
     def train_gs_fast_named(self, samples, labels, k, **args):

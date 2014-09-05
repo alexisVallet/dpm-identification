@@ -9,16 +9,14 @@ from grid_search import GridSearchMixin
 
 class BaseLatentMLR:
     def __init__(self, C, latent_function, latent_args, initbeta,
-                 nb_coord_iter=1, nb_gd_iter=100, opt='gd', learning_rate=0.0001,
+                 nb_coord_iter=1, nb_gd_iter=100, learning_rate=0.0001,
                  inc_rate=1.2, dec_rate=0.5, verbose=False):
-        assert opt in ['gd', 'rprop']
         # Basic parameters.
         self.C = C
         self.latent_function = latent_function
         self.latent_args = latent_args
         self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
-        self.opt = opt
         self.learning_rate = learning_rate
         self.dec_rate = dec_rate
         self.inc_rate = inc_rate
@@ -81,7 +79,7 @@ class BaseLatentMLR:
             T.argmax(predict_proba_sym, axis=1)
         )
 
-    def train(self, samples, labels):
+    def train(self, samples, labels, valid_samples=[], valid_labels=None):
         # Check parameters.
         assert labels.size == len(samples)
         for i in range(labels.size):
@@ -117,79 +115,11 @@ class BaseLatentMLR:
                 ),
                 (nb_samples,))
         )
-        cost = (
+        cost_sym = (
             regularization - self.C * T.sum(losses)
         )
-        if self.opt == 'gd':
-            self.train_gd(samples, labels, cost, lat_pos, lat_neg)
-        elif self.opt == 'rprop':
-            self.train_rprop(samples, labels, cost, lat_pos, lat_neg)
 
-    def train_gd(self, samples, labels, cost, lat_pos, lat_neg):
-        nb_samples = len(samples)
-        # Gradients.
-        grad_beta = T.grad(cost, self.beta)
-        updates = [
-            (self.beta, self.beta - self.learning_rate * grad_beta),
-        ]
-        # Theano function to compute cost and gradient norm while
-        # updating the model at the same time.
-        grad_descent = theano.function(
-            inputs=[],
-            outputs=[cost, 
-                     T.sqrt(T.dot(T.flatten(grad_beta), T.flatten(grad_beta)))],
-            updates=updates
-        )
-        new_lat_pos = np.empty(
-            [nb_samples, self.nb_features],
-            dtype=theano.config.floatX
-        )
-        new_lat_neg = np.empty(
-            [nb_samples, self.nb_features],
-            dtype=theano.config.floatX
-        )
-        bestmodel = np.empty(
-            [self.nb_features, self.nb_classes],
-            dtype=theano.config.floatX
-        )
-        bestcost = None
-        t = 0
-
-        for t_coord in range(self.nb_coord_iter):
-            # Compute the best positive latent vectors.
-            new_lat_pos = self.latent_function(
-                self.beta.get_value()[1:,:],
-                samples,
-                labels,
-                self.latent_args
-            )
-            lat_pos.set_value(new_lat_pos)
-
-            for t_gd in range(self.nb_gd_iter):
-                # Compute the best negative latent vectors.
-                new_lat_neg = self.latent_function(
-                    self.beta.get_value()[1:,:],
-                    samples,
-                    labels,
-                    self.latent_args
-                )
-                lat_neg.set_value(new_lat_neg)
-                cost, gradnorm = grad_descent()
-
-                if bestcost == None or cost < bestcost:
-                    bestmodel = np.array(self.beta.get_value(), copy=True)
-                    bestcost = cost
-                
-                if self.verbose:
-                    print "Epoch " + repr(t_gd + 1)
-                    print "Cost: " + repr(cost)
-                    print "Gradient norm: " + repr(gradnorm)
-        self.beta.set_value(bestmodel)
-        self.intercept_ = bestmodel[0,:]
-        self.coef_ = bestmodel[1:,:]
-
-    def train_rprop(self, samples, labels, cost_sym, lat_pos, lat_neg):
-        nb_samples = len(samples)
+        # Optimization of the cost with RPROP.
         weights_shape = self.beta.get_value().shape
         nb_weights = np.prod(weights_shape)
         # Keep step for each weight into a shared theano vector.
@@ -208,7 +138,8 @@ class BaseLatentMLR:
         )
         # Perform the first iteration "manually", to initialize prev_grad properly.
         init_grad = grad_f()
-        self.beta.set_value(self.beta.get_value() - steps.get_value() * init_grad)
+        self.beta.set_value(self.beta.get_value() - steps.get_value() 
+                            * np.sign(init_grad))
         # Keep the gradient from the previous iteration into another shared theano
         # vector.
         prev_grad = theano.shared(
@@ -229,7 +160,7 @@ class BaseLatentMLR:
         updates = [
             (steps, new_steps),
             (prev_grad, grad),
-            (self.beta, self.beta - steps * grad)
+            (self.beta, self.beta - steps * T.sgn(grad))
         ]
         # Full theano rprop function. Outputs the cost and gradient norm at the 
         # current point, and updates all the variables accordingly.
@@ -246,12 +177,10 @@ class BaseLatentMLR:
             [nb_samples, self.nb_features],
             dtype=theano.config.floatX
         )
-        bestmodel = np.empty(
-            [self.nb_features, self.nb_classes],
-            dtype=theano.config.floatX
-        )
-        bestcost = None
         eps = 10E-3
+        t = 1
+        prev_err_rate = None
+        prev_model = None
         
         # Running the usual coordinate descent.
         for t_coord in range(self.nb_coord_iter):
@@ -275,9 +204,6 @@ class BaseLatentMLR:
                 )
                 lat_neg.set_value(new_lat_neg)
                 cost_val, grad_norm = rprop_descent()
-                if bestcost == None or cost_val < bestcost:
-                    bestmodel = np.array(self.beta.get_value(), copy=True)
-                    bestcost = cost_val
                 if self.verbose:
                     print "Epoch " + repr(t_gd + 1)
                     print "Cost: " + repr(cost_val)
@@ -285,9 +211,30 @@ class BaseLatentMLR:
                     print "Mean step size: " + repr(steps.get_value().mean())
                 if grad_norm <= eps:
                     break
-        self.beta.set_value(bestmodel)
-        self.intercept_ = bestmodel[0,:]
-        self.coef_ = bestmodel[1:,:]
+                # Early stopping: every 10 epochs, measures error rate on the
+                # validation set. If higher than previous measure, stop learning.
+                if t % 10 == 0 and valid_samples != []:
+                    predicted = self.predict(valid_samples)
+                    nb_incorrect = 0
+
+                    for i in range(len(valid_samples)):
+                        if predicted[i] != valid_labels[i]:
+                            nb_incorrect += 1
+                    err_rate = float(nb_incorrect) / len(valid_samples) 
+                    if prev_err_rate == None or prev_err_rate > err_rate:
+                        prev_err_rate = err_rate
+                        prev_model = self.beta.get_value()
+                    elif err_rate > prev_err_rate:
+                        if self.verbose:
+                            print "Early stopping"
+                            print "Validation err rate: " + repr(prev_err_rate)
+                        self.beta.set_value(prev_model)
+                        self.intercept_ = prev_model[0,:]
+                        self.coef_ = prev_model[1:,:]
+                        return
+                t += 1
+        self.intercept_ = self.beta.get_value()[0,:]
+        self.coef_ = self.beta.get_value()[1:,:]
 
     def predict_proba(self, samples):
         nb_samples = len(samples)
@@ -342,17 +289,16 @@ class BaseMLR:
     """ Implementation of non-latent multinomial logistic regression based
         on latent MLR.
     """
-    def __init__(self, C=0.1, nb_iter=100, opt='gd', learning_rate=0.001, 
+    def __init__(self, C=0.1, nb_iter=100, learning_rate=0.001, 
                  inc_rate=1.2, dec_rate=0.5, verbose=False):
         self.C = C
         self.nb_iter = nb_iter
-        self.opt = opt
         self.learning_rate = learning_rate
         self.inc_rate = inc_rate
         self.dec_rate = dec_rate
         self.verbose = verbose
         
-    def train(self, samples, labels):
+    def train(self, samples, labels, valid_samples=[], valid_labels=None):
         nb_features = samples[0].size
         nb_classes = np.unique(labels).size
         
@@ -363,12 +309,11 @@ class BaseMLR:
                               ), 
                               nb_coord_iter=1,
                               nb_gd_iter=self.nb_iter,
-                              opt=self.opt,
                               learning_rate=self.learning_rate,
                               inc_rate=self.inc_rate,
                               dec_rate=self.dec_rate,
                               verbose=self.verbose)
-        self.lmlr.train(samples, labels)
+        self.lmlr.train(samples, labels, valid_samples, valid_labels)
         self.intercept_ = self.lmlr.intercept_
         self.coef_ = self.lmlr.coef_
 
