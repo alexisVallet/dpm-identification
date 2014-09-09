@@ -6,6 +6,19 @@ import cv2
 
 from features import Feature, warped_fmaps_simple, warped_fmaps_dimred
 
+def random_windows(images, win_per_sample, size=0.9):
+    meanar = np.mean(map(lambda s: float(s.shape[1]) / s.shape[0], images))
+    # For each image, take win_per_sample random windows with aspect ratio
+    # the mean aspect ratio, and a fraction of the minimum dimension of this
+    # aspect ratio.
+    new_images = []
+    row_factor = None
+    col_factor = None
+    if meanar < 1:
+        col_factor = size
+        row_factor = size / meanar
+        
+
 def random_windows_fmaps(images, labels, out_mdd, win_per_sample,
                          feature, size=0.9, pca=None):
     """ Generates a dataset of feature maps by taking random

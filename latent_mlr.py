@@ -5,7 +5,7 @@ import theano
 import theano.tensor as T
 from scipy.optimize import fmin_l_bfgs_b
 
-from grid_search import GridSearchMixin
+from classifier import ClassifierMixin
 
 class BaseLatentMLR:
     def __init__(self, C, latent_function, latent_args, initbeta,
@@ -279,7 +279,7 @@ class BaseLatentMLR:
 
         return self._predict_label(test_latents)
 
-class LatentMLR(BaseLatentMLR, GridSearchMixin):
+class LatentMLR(BaseLatentMLR, ClassifierMixin):
     pass
 
 def _dummy_latent(beta, samples, labels, args):
@@ -323,5 +323,5 @@ class BaseMLR:
     def predict(self, samples):
         return self.lmlr.predict(samples)
 
-class MLR(BaseMLR, GridSearchMixin):
+class MLR(BaseMLR, ClassifierMixin):
     pass

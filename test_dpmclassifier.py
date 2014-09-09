@@ -46,11 +46,12 @@ class TestDPMClassifier(unittest.TestCase):
             mindimdiv,
             nbparts,
             deform_factor,
-            nb_coord_iter=4,
-            nb_gd_iter=25,
-            learning_rate=0.001,
+            nb_coord_iter=5,
+            nb_gd_iter=10,
+            learning_rate=0.0001,
             inc_rate=1.2,
             dec_rate=0.5,
+            nb_subwins=10,
             use_pca=0.9,
             verbose=True
         )
@@ -64,23 +65,9 @@ class TestDPMClassifier(unittest.TestCase):
                 trainlabels.append(k)
 
         print "Training..."
-        cachename = 'data/dpmid-cache/test'
-        if not os.path.isfile(cachename):
-            classifier.train_validation_named(trainsamples, trainlabels)
-            cachefile = open(cachename, 'w')
-            pickle.dump(classifier, cachefile)
-            cachefile.close()
-        else:
-            cachefile = open(cachename)
-            classifier = pickle.load(cachefile)
-            cachefile.close()
-
-        print "Deformation coeffs:"
-        for dpm in classifier.dpms:
-            print dpm.deforms
+        classifier.train_named(trainsamples, trainlabels)
 
         print "Prediction..."
-
         testsamples = []
         expected = []
 
@@ -88,20 +75,8 @@ class TestDPMClassifier(unittest.TestCase):
             for s in self.testdata[k]:
                 testsamples.append(s)
                 expected.append(k)
-        probas = classifier.predict_proba(testsamples)
-        nb_classes = probas.shape[1]
-        
-        for top in range(1, 21):
-            nb_correct = 0
-
-            for i in range(len(testsamples)):
-                top_idx = np.argsort(probas[i,:])[nb_classes-top:].tolist()
-                top_names = map(lambda i: classifier.int_to_label[i], top_idx)
-
-                if expected[i] in top_names:
-                    nb_correct += 1
-
-            print "top " + repr(top) + " recognition rate: " + repr(float(nb_correct)/len(testsamples))
+        print "top-1 to top-20 accuracy:"
+        print classifier.top_accuracy_named(testsamples, expected)
 
 if __name__ == "__main__":
     unittest.main()
