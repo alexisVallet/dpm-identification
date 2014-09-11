@@ -4,8 +4,9 @@ import numpy as np
 import cv2
 
 from gdt import gdt2D
+from features import Feature
 
-def match_filter(fmap, linfilter, return_padded=False):
+def match_filter(fmap, linfilter):
     """ Returns the response map of a linear filter on a feature map.
         Inputs should hold 32 bits floating point coefficients for
         best performance. Will be converted if necessary.
@@ -21,33 +22,25 @@ def match_filter(fmap, linfilter, return_padded=False):
         to the response of the filter when its center is positioned on
         this pixel.
     """
+    if fmap.shape[2] > 512:
+        raise ValueError("""
+Cannot compute cross-correlation for feature dimension greater than 512.
+This is a limitation in OpenCV. The future switch to GPU backend for cross
+correlations should hopefully fix this bug.
+        """)
     fmap_ = fmap.astype(np.float32)
     linfilter_ = linfilter.astype(np.float32)
-    # Pad the feature map with zeros with half linear filter sizes.
-    filtrows, filtcols = linfilter_.shape[0:2]
-    hrows, hcols = (filtrows // 2, filtcols // 2)
-    # opencv returns a one pixel larger map for even filters, so we
-    # compensate
-    roffset = 1 - filtrows % 2
-    coffset = 1 - filtcols % 2
-    paddedfmap = np.pad(
-        fmap_,
-        [(hrows,hrows-roffset),(hcols,hcols-coffset),(0,0)],
-        mode='constant',
-        constant_values=[(0,0)] * 3
-    )
-    
-    # Run cross correlation of the filter on the padded map.
+    # Run cross correlation of the filter on the map.
     response = cv2.matchTemplate(
-        paddedfmap,
+        fmap_,
         linfilter_,
         method=cv2.TM_CCORR
     )
-    if return_padded:
-        return (response, paddedfmap)
+
     return response
 
-def match_part(fmap, partfilter, anchor, deform):
+def match_part(fmap, partfilter, anchor, deform, 
+               deform_factor, debug=False):
     """ Matches a DPM part against a feature map.
     
     Arguments:
@@ -61,34 +54,39 @@ def match_part(fmap, partfilter, anchor, deform):
         - subwin is the best matching subwindow from the original feature map.
         - di, dj is the displacement from the anchor position to the subwindow.
     """
+    if debug:
+        nbbins = (4,4,4)
+        feature = Feature('bgrhist', np.prod(nbbins), nbbins)
+        cv2.namedWindow('fmap', cv2.WINDOW_NORMAL)
+        cv2.imshow('fmap', feature.vis_featmap(fmap))
+        cv2.namedWindow('part', cv2.WINDOW_NORMAL)
+        cv2.imshow('part', feature.vis_featmap(partfilter))
+        cv2.waitKey(0)
     # Compute the reponse of the filter.
     response = match_filter(fmap, partfilter)
-    # Pad the response before GDT computation to allow for deformations out
-    # of the box. Allow a full part size out. Outside, the part doesn't match
-    # anything but zeros so no point in going further.
-    padding = partfilter.shape[0]
-    paddedresp = np.pad(
-        response,
-        [(padding, padding)]*2,
-        mode='constant',
-        constant_values=(0,)
-    )
-    # Run GDT to compute score taking deformations into account and optimal
-    # displacement. GDT expects deformation costs in dx, dy, dx^2, dy^2
-    # format so we switch things around in deform accordingly.
+    if debug:
+        respmin = response.min()
+        respmax = response.max()
+        print "Response max: " + repr(respmax) + ", min: " + repr(respmin)
+        cv2.namedWindow('response', cv2.WINDOW_NORMAL)
+        cv2.imshow('response', (response - respmin) / (respmax - respmin))
+        cv2.waitKey(0)
+    # Run GDT to compute score taking deformations into account and 
+    # optimal displacement. GDT expects deformation costs in dx, dy, 
+    # dx^2, dy^2 format so we switch things around in deform accordingly.
     dy, dx, dy2, dx2 = deform
-    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), paddedresp)
-    # Get the optimal position by looking up the args array, taking into
-    # account padding
-    anci, ancj = anchor + np.array([padding,padding])
-    di, dj = args[anci, ancj] - np.array([anci, ancj])
-    # Get the corresponding subwindow from am appropriately padded feature map.
-    paddedmap = np.pad(
-        fmap,
-        [(padding,padding)]*2 + [(0,0)],
-        mode='constant',
-        constant_values=(0,)
-    )
+    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), response,
+                     scaling=deform_factor)
+    if debug:
+        respmin = df.min()
+        respmax = df.max()
+        print "DF max: " + repr(respmax) + ", min: " + repr(respmin)
+        cv2.namedWindow('df', cv2.WINDOW_NORMAL)
+        cv2.imshow('df', (df - respmin) / (respmax - respmin))
+        cv2.waitKey(0)
+    # Get the optimal position by looking up the args array
+    anci, ancj = anchor
+    di, dj = args[anci, ancj] - anchor
     partsize = partfilter.shape[0]
 
-    return (paddedmap[anci:anci+partsize,ancj:ancj+partsize], di, dj)
+    return (fmap[anci:anci+partsize,ancj:ancj+partsize], di, dj)
