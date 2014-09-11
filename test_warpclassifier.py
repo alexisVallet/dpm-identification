@@ -79,7 +79,7 @@ class TestWarpClassifier(unittest.TestCase):
             for s in self.testdata[k]:
                 testsamples.append(s)
                 expected.append(k)
-        predicted = classifier.predict_averaged_named(testsamples)
+        predicted = classifier.predict_named(testsamples)
         nb_correct = 0
 
         for i in range(len(testsamples)):

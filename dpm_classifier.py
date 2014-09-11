@@ -107,13 +107,19 @@ def _best_match_wrapper(modelvector, featmap, args):
 
     return latvec
 
-def _best_matches(beta, fmaps, labels, args):
+# Ugly hack.
+_match_filters = None
+
+def _best_matches(beta, fmaps_shared, labels, args):
     nb_features, nb_classes = beta.shape
-    nb_samples = len(fmaps)
-    latents = np.empty([nb_samples, nb_features],
-    dtype=theano.config.floatX)
+    nb_samples = args['nb_samples']
+    fmaps = args['fmaps']
+    latents = np.empty([nb_samples, nb_features], dtype=theano.config.floatX)
+
+    # Compute all filter responses on the GPU.
+        
     for i in range(nb_samples):
-        latvec = _best_match_wrapper(beta[:,labels[i]], fmaps[i], args)
+        latvec = _best_match_wrapper(beta[:,labels[i]], fmaps, args)
         latents[i] = latvec
     return latents
 
@@ -144,6 +150,7 @@ class BaseDPMClassifier:
         """ Training procedure which takes precomputed feature maps as inputs.
             For efficiency purposes in grid search.
         """
+        global _match_filters # Urrrrrr
         # Initialize the model with a warping classifier, taking
         # high energy subwindows as parts.
         warp = WarpClassifier(
@@ -185,6 +192,8 @@ class BaseDPMClassifier:
         # feature scaling issues in the gradient descent.
         square_lead_dim = np.max(fmaps[0].shape[0:2])**2
         args = {
+            'nb_samples': nb_samples,
+            'fmaps': fmaps,
             'size': dpmsize,
             'df': float(self.deform_factor) / square_lead_dim
         }
@@ -194,6 +203,7 @@ class BaseDPMClassifier:
             _best_matches,
             args,
             initmodel,
+            nb_samples=nb_samples,
             nb_coord_iter=self.nb_coord_iter,
             nb_gd_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
@@ -201,7 +211,22 @@ class BaseDPMClassifier:
             dec_rate=self.dec_rate,
             verbose=self.verbose
         )
-        self.lmlr.train(fmaps, labels, valid_fmaps, valid_labels)
+
+        # Put the feature maps into a shared theano 4D tensor for more efficient
+        # GPU training.
+        fmaps_tensor = np.empty(
+            [nb_samples, self.featdim, self.nbrowfeat, self.nbcolfeat],
+            theano.config.floatX
+        )
+        for i in range(nb_samples):
+            # The format theano expects for feature maps is annoying, so there is a bit of
+            # copying going on.
+            for j in range(self.featdim):
+                fmaps_tensor[i,j] = fmaps[i][:,:,j]
+        fmaps_shared = theano.shared(fmaps_tensor, 'fmaps')
+        _match_filters = match_filters(fmaps_shared)
+            
+        self.lmlr.train(fmaps_shared, labels, valid_fmaps, valid_labels)
         # Save the DPMs for visualization purposes.
         self.dpms = []
 

@@ -133,46 +133,6 @@ class BaseWarpClassifier:
     def predict_proba(self, samples):
         return self.lr.predict_proba(self.test_fmaps(samples))
 
-    def predict_proba_averaged(self, samples):
-        """ Predicts probability for each sample by averageing over randomly chosen
-            subwindows of each image.
-        """
-        # Extend the test dataset.
-        nb_samples = len(samples)
-        # X is now a data matrix of feature maps, I want just a data matrix
-        # of features to project.
-        X_feat = X.reshape(
-            [nb_samples * self.nbrowfeat * self.nbcolfeat, 
-             self.feature.dimension]
-        )
-        # Project the features to the principal subspace.
-        X_feat_new = self.pca.transform(X_feat)
-        # Convert back to feature maps.
-        X_new = X_feat_new.reshape(
-            [nb_samples, self.nbrowfeat * self.nbcolfeat *
-             self.pca.n_components]
-        )
-        # Convert it back to a feature maps representation.
-        fmaps = []
-        for i in range(nb_samples):
-            fmaps.append(X_new[i])
-        # Run prediction on these new samples.
-        probas = self.
-        nb_classes = probas.shape[1]
-        # Average the predictions out, taking the rows nb_subwins by nb_subwins.
-        averaged = np.empty([nb_samples, nb_classes], theano.config.floatX)
-        
-        for i in range(nb_samples):
-            averaged[i] = np.mean(
-                probas[i*self.nb_subwins:(i+1)*self.nb_subwins],
-                axis=0
-            )
-        return averaged
-
-    def predict_averaged(self, samples):
-        probas = self.predict_proba_averaged(samples)
-        return np.argmax(probas, axis=1)
-
     def predict(self, samples):
         return self.lr.predict(self.test_fmaps(samples))
 

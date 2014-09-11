@@ -8,13 +8,14 @@ from scipy.optimize import fmin_l_bfgs_b
 from classifier import ClassifierMixin
 
 class BaseLatentMLR:
-    def __init__(self, C, latent_function, latent_args, initbeta,
+    def __init__(self, C, latent_function, latent_args, initbeta, nb_samples=None,
                  nb_coord_iter=1, nb_gd_iter=100, learning_rate=0.0001,
                  inc_rate=1.2, dec_rate=0.5, verbose=False):
         # Basic parameters.
         self.C = C
         self.latent_function = latent_function
         self.latent_args = latent_args
+        self.nb_samples = nb_samples
         self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
@@ -84,8 +85,8 @@ class BaseLatentMLR:
         assert labels.size == len(samples)
         for i in range(labels.size):
             assert labels[i] in range(self.nb_classes)
-
-        nb_samples = len(samples)
+        # If nb_samples wasn't provided, assume samples is a list:
+        nb_samples = len(samples) if self.nb_samples == None else self.nb_samples
         # Set and compile the theano gradient descent update function.
         lat_pos = theano.shared(
             np.empty([nb_samples, self.nb_features],
@@ -178,7 +179,6 @@ class BaseLatentMLR:
             dtype=theano.config.floatX
         )
         eps = 10E-3
-        t = 1
         prev_err_rate = None
         prev_model = None
         
@@ -211,28 +211,6 @@ class BaseLatentMLR:
                     print "Mean step size: " + repr(steps.get_value().mean())
                 if grad_norm <= eps:
                     break
-                # Early stopping: every 10 epochs, measures error rate on the
-                # validation set. If higher than previous measure, stop learning.
-                if t % 10 == 0 and valid_samples != []:
-                    predicted = self.predict(valid_samples)
-                    nb_incorrect = 0
-
-                    for i in range(len(valid_samples)):
-                        if predicted[i] != valid_labels[i]:
-                            nb_incorrect += 1
-                    err_rate = float(nb_incorrect) / len(valid_samples) 
-                    if prev_err_rate == None or prev_err_rate > err_rate:
-                        prev_err_rate = err_rate
-                        prev_model = self.beta.get_value()
-                    elif err_rate > prev_err_rate:
-                        if self.verbose:
-                            print "Early stopping"
-                            print "Validation err rate: " + repr(prev_err_rate)
-                        self.beta.set_value(prev_model)
-                        self.intercept_ = prev_model[0,:]
-                        self.coef_ = prev_model[1:,:]
-                        return
-                t += 1
         self.intercept_ = self.beta.get_value()[0,:]
         self.coef_ = self.beta.get_value()[1:,:]
 
