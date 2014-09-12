@@ -8,7 +8,7 @@ import features as feat
 from latent_mlr import MLR
 import lr
 from classifier import ClassifierMixin
-from dataset_transform import random_windows_fmaps, left_right_flip
+from features import warped_fmaps_dimred, warped_fmaps_simple
 
 class BaseWarpClassifier:
     def __init__(self, feature=feat.BGRHist((4,4,4),0), mindimdiv=10, 
@@ -66,35 +66,28 @@ class BaseWarpClassifier:
     def train(self, samples, labels, valid_samples=[], valid_labels=None):
         # Compute feature maps.
         if self.use_pca != None:
-            fmaps, newlabels, self.pca = random_windows_fmaps(
+            fmaps, self.nbrowfeat, self.nbcolfeat, self.pca = warped_fmaps_dimred(
                 samples,
-                labels,
                 self.mindimdiv,
-                self.nb_subwins,
                 self.feature,
-                size=0.7,
-                pca=self.use_pca
+                min_var=self.use_pca
             )
-            self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+            self.featdim = fmaps[0].shape[2]
             valid_fmaps = []
             if valid_labels != None or valid_samples == []:
                 valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, newlabels, valid_fmaps, valid_labels)
+            self._train(fmaps, labels, valid_fmaps, valid_labels)
         else:
-            fmaps, newlabels = random_windows_fmaps(
+            fmaps, self.nbrowfeat, self.nbcolfeat = random_windows_fmaps(
                 samples,
-                labels,
                 self.mindimdiv,
-                self.nb_subwins,
-                self.feature,
-                size=0.7,
-                pca=None
+                self.feature
             )
-            self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+            self.featdim = fmaps[0].shape[2]
             valid_fmaps = []
             if valid_labels != None or valid_samples == []:
                 valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, newlabels, valid_fmaps, valid_samples)
+            self._train(fmaps, labels, valid_fmaps, valid_samples)
 
     def test_fmaps(self, samples):
         nb_samples = len(samples)
