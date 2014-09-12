@@ -51,7 +51,7 @@ class TestDPMClassifier(unittest.TestCase):
             learning_rate=0.0001,
             inc_rate=1.2,
             dec_rate=0.5,
-            nb_subwins=10,
+            nb_subwins=1,
             use_pca=0.9,
             verbose=True
         )

@@ -54,14 +54,6 @@ def match_part(fmap, partfilter, anchor, deform,
         - subwin is the best matching subwindow from the original feature map.
         - di, dj is the displacement from the anchor position to the subwindow.
     """
-    if debug:
-        nbbins = (4,4,4)
-        feature = Feature('bgrhist', np.prod(nbbins), nbbins)
-        cv2.namedWindow('fmap', cv2.WINDOW_NORMAL)
-        cv2.imshow('fmap', feature.vis_featmap(fmap))
-        cv2.namedWindow('part', cv2.WINDOW_NORMAL)
-        cv2.imshow('part', feature.vis_featmap(partfilter))
-        cv2.waitKey(0)
     # Compute the reponse of the filter.
     response = match_filter(fmap, partfilter)
     if debug:
