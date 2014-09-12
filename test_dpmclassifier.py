@@ -37,7 +37,7 @@ class TestDPMClassifier(unittest.TestCase):
             HoG(9,1)
         )
         mindimdiv = 10
-        C = 0.01
+        C = 0.1
         nbparts = 4
         classifier = DPMClassifier(
             C,
@@ -45,7 +45,7 @@ class TestDPMClassifier(unittest.TestCase):
             mindimdiv,
             nbparts,
             nb_gd_iter=50,
-            learning_rate=0.001,
+            learning_rate=0.0001,
             inc_rate=1.2,
             dec_rate=0.5,
             use_pca=0.9,
@@ -62,6 +62,10 @@ class TestDPMClassifier(unittest.TestCase):
 
         print "Training..."
         classifier.train_named(trainsamples, trainlabels)
+
+        # Let's display some info about the DPMs.
+        for dpm in classifier.dpms:
+            print "deforms: " + repr(dpm.deforms)
 
         print "Prediction..."
         testsamples = []

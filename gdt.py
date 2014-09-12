@@ -80,7 +80,6 @@ def gdt2D(d, f, rg=None, scaling=1.):
     if rg==None:
         rg = max(rows,cols)
     df = np.empty(f.shape, dtype=np.float32)
-    print (df.min(), df.max(), df.mean())
     argi = np.empty([rows,cols,1], dtype=np.int32)
     argj = np.empty([rows,cols,1], dtype=np.int32)
     cgdt2D(d_, f_, rows, cols, df, argi, argj, rg)

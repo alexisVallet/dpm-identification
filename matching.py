@@ -55,17 +55,17 @@ def best_response_subwindow(fmap, response, anchor, deform, partsize, deform_fac
     # optimal displacement. GDT expects deformation costs in dx, dy, 
     # dx^2, dy^2 format so we switch things around in deform accordingly.
     dy, dx, dy2, dx2 = deform
-    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), response, scaling=deform_factor)
-    print deform
-    print deform_factor
-    print (df.min(), df.max(), df.mean())
-    cv2.namedWindow('input response', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('gdt output', cv2.WINDOW_NORMAL)
-    cv2.imshow('input response', (response - response.min()) / (response.max() - response.min()))
-    cv2.imshow('gdt output', (df - df.min()) / (df.max() - df.min()))
-    cv2.waitKey(0)
-    # Get the optimal position by looking up the args array
+    # GDT is numerically unstable for small response values. So we simply
+    # always scale it linearly (and deformation coefficients accordingly)
+    # so its standard deviation is roughly 100. This doesn't change the
+    # location of the max.
+    resp_scale = 100. / response.std()
+    gdt, args = gdt2D(resp_scale*np.array([dx, dy, dx2, dy2], np.float32), -resp_scale*response)
+    df = -gdt
+    # Get the optimal position by taking the max. Screw the args array.
     anci, ancj = anchor
-    di, dj = args[anci, ancj] - anchor
+    maxi, maxj = np.unravel_index(np.argmax(df), df.shape)
+    di = maxi - anci
+    dj = maxj - ancj
 
-    return (fmap[anci:anci+partsize,ancj:ancj+partsize], di, dj)
+    return (fmap[anci+di:anci+di+partsize,ancj+dj:ancj+dj+partsize], di, dj)

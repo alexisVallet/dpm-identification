@@ -40,7 +40,6 @@ def _best_matches(beta, fmaps_shared, labels, args):
     global _match_filters
     nb_features, nb_classes = beta.shape
     nb_samples = args['nb_samples']
-    nb_classes = args['nb_classes']
     fmaps = args['fmaps']
     dpm_size = args['size']
     deform_factor = args['df']
@@ -62,26 +61,6 @@ def _best_matches(beta, fmaps_shared, labels, args):
     responses_tensor = _match_filters(filters)
     nb_parts = len(dpms[0].parts)
     partsize = dpms[0].parts[0].shape[0]
-    # print "Expected: " + repr((nb_samples, len(filters)))
-    # print "Actual: " + repr(responses_tensor.shape)
-    # # Testing stuff: displaying computed cross-correlation, and
-    # # comparing against opencv's results.
-    # cv2.namedWindow('actual', cv2.WINDOW_NORMAL)
-    # cv2.namedWindow('expected', cv2.WINDOW_NORMAL)
-    # for i in range(nb_samples):
-    #     fmap = fmaps[i].astype(np.float32)
-    #     for j in range(nb_classes):
-    #         for k in range(nb_parts):
-    #             filt = dpms[j].parts[k]
-    #             expected_resp = cv2.matchTemplate(fmap, filt, method=cv2.TM_CCORR)
-    #             actual_resp = responses_tensor[i, j*nb_parts + k]
-    #             print expected_resp.dtype
-    #             print actual_resp.dtype
-    #             print "Actual min: " + repr(actual_resp.min()) + ", max: " + repr(actual_resp.max()) + ", mean: " + repr(actual_resp.mean())
-    #             print "Expected min: " + repr(expected_resp.min()) + ", max: " + repr(expected_resp.max()) + ", mean: " + repr(expected_resp.mean())
-    #             cv2.imshow('actual', (actual_resp - actual_resp.min()) / (actual_resp.max() - actual_resp.min()))
-    #             cv2.imshow('expected', (expected_resp - expected_resp.min()) / (expected_resp.max() - expected_resp.min()))
-    #             cv2.waitKey(0)
     # Then, from these responses, compute the best subwindows of
     # the corresponding feature maps and corresponding displacement
     # using the GDT.
@@ -91,16 +70,17 @@ def _best_matches(beta, fmaps_shared, labels, args):
         for j in range(nb_classes):
             subwins = []
             for k in range(nb_parts):
-                subwins.append(
-                    best_response_subwindow(
-                        fmaps[i],
-                        responses_tensor[i,j*nb_parts+k],
-                        dpms[j].anchors[k],
-                        dpms[j].deforms[k],
-                        partsize,
-                        deform_factor
-                    )
+                (subwin, di, dj) = best_response_subwindow(
+                    fmaps[i],
+                    responses_tensor[i,j*nb_parts+k],
+                    dpms[j].anchors[k],
+                    dpms[j].deforms[k],
+                    partsize,
+                    deform_factor
                 )
+                
+                subwins.append((subwin, di, dj))
+                
             subwins_per_class.append(subwins)
         subwins_per_sample_per_class.append(subwins_per_class)
     # Now, we need to convert these subwindows into proper latent
@@ -114,9 +94,8 @@ def _best_matches(beta, fmaps_shared, labels, args):
     for i in range(nb_samples):
         featmap = fmaps[i]
         for j in range(nb_classes):
-            modelvector = beta[:,j]
             # Put the computed latent values into a proper latent vector.
-            latvec = np.empty([modelvector.size])
+            latvec = np.empty([nb_features])
             offset = 0
             # Get the subwindows and displacements.
             subwins_and_disp = subwins_per_sample_per_class[i][j]
@@ -137,7 +116,7 @@ def _best_matches(beta, fmaps_shared, labels, args):
                 di, dj = disp
                 latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
                 offset = offset+4
-            assert offset == modelvector.size
+            assert offset == nb_features
             latents[j,i] = latvec
     return latents
 

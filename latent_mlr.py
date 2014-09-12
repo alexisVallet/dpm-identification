@@ -152,7 +152,7 @@ class BaseLatentMLR:
         # current point, and updates all the variables accordingly.
         rprop_descent = theano.function(
             [],
-            [cost_sym, grad.norm(2)],
+            [cost_sym, grad.norm(2), scores.shape, losses.shape],
             updates=updates
         )
         new_lat = np.empty(
@@ -172,7 +172,7 @@ class BaseLatentMLR:
                 self.latent_args
             )
             lat.set_value(new_lat)
-            cost_val, grad_norm = rprop_descent()
+            cost_val, grad_norm, scores_shape, losses_shape = rprop_descent()
             if self.verbose:
                 print "Epoch " + repr(t_gd + 1)
                 print "Cost: " + repr(cost_val)
