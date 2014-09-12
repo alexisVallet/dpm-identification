@@ -75,14 +75,15 @@ def gdt2D(d, f, rg=None, scaling=1.):
          scaling**2 * cx2, scaling**2 * cy2],
         dtype=np.float32
     )
+    f_ = np.array(f, copy=True, dtype=np.float32)
     rows, cols = f.shape
     if rg==None:
         rg = max(rows,cols)
     df = np.empty(f.shape, dtype=np.float32)
+    print (df.min(), df.max(), df.mean())
     argi = np.empty([rows,cols,1], dtype=np.int32)
     argj = np.empty([rows,cols,1], dtype=np.int32)
-    cgdt2D(d_.astype(np.float32), f.astype(np.float32), rows, cols,
-           df, argi, argj, rg)
+    cgdt2D(d_, f_, rows, cols, df, argi, argj, rg)
 
     return (df, np.concatenate((argi,argj), axis=2))
 

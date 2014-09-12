@@ -5,13 +5,12 @@ import cv2
 import theano
 from itertools import product
 
-from matching import match_part
+from matching import compile_match_filters, best_response_subwindow
 from dpm import DPM, vectortodpm
 from warpclassifier import WarpClassifier
 from latent_mlr import LatentMLR
-from features import max_energy_subwindow, warped_fmaps_simple, Combine, BGRHist, HoG
+from features import max_energy_subwindow, warped_fmaps_dimred, warped_fmaps_simple, Combine, BGRHist, HoG
 from classifier import ClassifierMixin
-from dataset_transform import random_windows_fmaps
 
 def _init_dpm(warpmap, nbparts, partsize):
     """ Initializes a DPM by greedily taking high energy subwindows
@@ -34,93 +33,112 @@ def _init_dpm(warpmap, nbparts, partsize):
         warpcopy[ai:ai+partsize,aj:aj+partsize] = 0
     return DPM(initparts, initanchors, initdeforms)
 
-def _best_match(dpm, featmap, deform_factor, debug=False):
-    """ Computes the best matching subwindows and corresponding
-        displacements of a root less deformable parts model on a
-        feature map.
-
-    Arguments:
-        dpm     deformable part model to match on the feature map.
-        featmap feature map to match the DPM on.
-
-    Returns:
-        (subwins, displacements) where:
-        - subwins is a list of k subwindows of the (possibly zero-padded)
-          input feature map, where k is the number is the number of parts
-          of the DPM. Corresponds to the best possible positioning of each
-          part.
-        - displacements is a list of k (di, dj) pairs corresponding to the
-          vertical (di) and horizonal (dj) of each optimal part position
-          compared to its anchor position.
-    """
-    winsanddisp = map(
-        lambda i: match_part(
-            featmap,
-            dpm.parts[i], 
-            dpm.anchors[i],
-            dpm.deforms[i],
-            deform_factor,
-            debug
-        ),
-        range(len(dpm.parts))
-    )
-    subwins = [res[0] for res in winsanddisp]
-    displacements = [res[1:3] for res in winsanddisp]
-    scaled_disp = []
-
-    for i in range(len(dpm.parts)):
-        di, dj = displacements[i]
-        scaled_disp.append(
-            (float(di) * deform_factor, float(dj) * deform_factor)
-        )
-
-    return (subwins, scaled_disp)
-
-def _best_match_wrapper(modelvector, featmap, args):
-    """ Wrapper to _best_match to convert everything into the proper
-        vector format.
-    """
-    modelsize = args['size']
-    deform_factor = args['df']
-
-    # Compute the best match on the converted model data structure.
-    (subwins, displacements) = _best_match(
-        vectortodpm(modelvector, modelsize),
-        featmap,
-        deform_factor
-    )
-
-    # Put the computed latent values into a proper latent vector.
-    latvec = np.empty([modelvector.size])
-    offset = 0
-    # Flatten subwindows.
-    for subwin in subwins:
-        flatwin = subwin.flatten('C')
-        latvec[offset:offset+flatwin.size] = flatwin
-        offset += flatwin.size
-    # Introduce the part displacements.
-    for disp in displacements:
-        di, dj = disp
-        latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
-        offset = offset+4
-    assert offset == modelvector.size
-
-    return latvec
-
 # Ugly hack.
 _match_filters = None
 
 def _best_matches(beta, fmaps_shared, labels, args):
+    global _match_filters
     nb_features, nb_classes = beta.shape
     nb_samples = args['nb_samples']
+    nb_classes = args['nb_classes']
     fmaps = args['fmaps']
-    latents = np.empty([nb_samples, nb_features], dtype=theano.config.floatX)
-
-    # Compute all filter responses on the GPU.
-        
+    dpm_size = args['size']
+    deform_factor = args['df']
+    # Compile the matching function if it hasn't already been done.
+    if _match_filters == None:
+        _match_filters = compile_match_filters(fmaps_shared)
+    # Compute the cross correlation of all filters across
+    # all DPMs on each training sample in one pass on the GPU.
+    # For that, need to compile the filters in one big list.
+    dpms = []
+    filters = []
+    for i in range(nb_classes):
+        dpm = vectortodpm(beta[:,i], dpm_size)
+        dpms.append(dpm)
+        filters += dpm.parts
+    # responses_tensor is a 4D tensor of shape
+    # (nb_samples, nb_filters, response_row, response_col) which
+    # contains all the filter responses, in order.
+    responses_tensor = _match_filters(filters)
+    nb_parts = len(dpms[0].parts)
+    partsize = dpms[0].parts[0].shape[0]
+    # print "Expected: " + repr((nb_samples, len(filters)))
+    # print "Actual: " + repr(responses_tensor.shape)
+    # # Testing stuff: displaying computed cross-correlation, and
+    # # comparing against opencv's results.
+    # cv2.namedWindow('actual', cv2.WINDOW_NORMAL)
+    # cv2.namedWindow('expected', cv2.WINDOW_NORMAL)
+    # for i in range(nb_samples):
+    #     fmap = fmaps[i].astype(np.float32)
+    #     for j in range(nb_classes):
+    #         for k in range(nb_parts):
+    #             filt = dpms[j].parts[k]
+    #             expected_resp = cv2.matchTemplate(fmap, filt, method=cv2.TM_CCORR)
+    #             actual_resp = responses_tensor[i, j*nb_parts + k]
+    #             print expected_resp.dtype
+    #             print actual_resp.dtype
+    #             print "Actual min: " + repr(actual_resp.min()) + ", max: " + repr(actual_resp.max()) + ", mean: " + repr(actual_resp.mean())
+    #             print "Expected min: " + repr(expected_resp.min()) + ", max: " + repr(expected_resp.max()) + ", mean: " + repr(expected_resp.mean())
+    #             cv2.imshow('actual', (actual_resp - actual_resp.min()) / (actual_resp.max() - actual_resp.min()))
+    #             cv2.imshow('expected', (expected_resp - expected_resp.min()) / (expected_resp.max() - expected_resp.min()))
+    #             cv2.waitKey(0)
+    # Then, from these responses, compute the best subwindows of
+    # the corresponding feature maps and corresponding displacement
+    # using the GDT.
+    subwins_per_sample_per_class = []
     for i in range(nb_samples):
-        latvec = _best_match_wrapper(beta[:,labels[i]], fmaps, args)
-        latents[i] = latvec
+        subwins_per_class = []
+        for j in range(nb_classes):
+            subwins = []
+            for k in range(nb_parts):
+                subwins.append(
+                    best_response_subwindow(
+                        fmaps[i],
+                        responses_tensor[i,j*nb_parts+k],
+                        dpms[j].anchors[k],
+                        dpms[j].deforms[k],
+                        partsize,
+                        deform_factor
+                    )
+                )
+            subwins_per_class.append(subwins)
+        subwins_per_sample_per_class.append(subwins_per_class)
+    # Now, we need to convert these subwindows into proper latent
+    # vectors, and slap them into a (nb_classes, nb_samples, nb_features)
+    # shaped tensor so latent MLR can properly work with it.
+    latents = np.empty(
+        [nb_classes, nb_samples, nb_features],
+        theano.config.floatX
+    )
+
+    for i in range(nb_samples):
+        featmap = fmaps[i]
+        for j in range(nb_classes):
+            modelvector = beta[:,j]
+            # Put the computed latent values into a proper latent vector.
+            latvec = np.empty([modelvector.size])
+            offset = 0
+            # Get the subwindows and displacements.
+            subwins_and_disp = subwins_per_sample_per_class[i][j]
+            subwins = [sdsp[0] for sdsp in subwins_and_disp]
+            displacements = [sdsp[1:3] for sdsp in subwins_and_disp]
+            # Add feature scaling for displacements.
+            scaled_disp = map(
+                lambda d: (float(d[0]) * deform_factor, float(d[1]) * deform_factor),
+                displacements
+            )
+            # Flatten subwindows.
+            for subwin in subwins:
+                flatwin = subwin.flatten('C')
+                latvec[offset:offset+flatwin.size] = flatwin
+                offset += flatwin.size
+            # Introduce the part displacements.
+            for disp in scaled_disp:
+                di, dj = disp
+                latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
+                offset = offset+4
+            assert offset == modelvector.size
+            latents[j,i] = latvec
     return latents
 
 class BaseDPMClassifier:
@@ -128,21 +146,16 @@ class BaseDPMClassifier:
         logistic regression.
     """
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
-                 mindimdiv=10, nbparts=4, deform_factor=1.,
-                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.001,
-                 inc_rate=1.2, dec_rate=0.5, nb_subwins=20, use_pca=None, 
-                 verbose=False):
+                 mindimdiv=10, nbparts=4, nb_gd_iter=100, learning_rate=0.001,
+                 inc_rate=1.2, dec_rate=0.5, use_pca=None, verbose=False):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.nbparts = nbparts
-        self.deform_factor = deform_factor
         self.inc_rate = inc_rate
         self.dec_rate = dec_rate
-        self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
-        self.nb_subwins = nb_subwins
         self.use_pca = use_pca
         self.verbose = verbose
 
@@ -151,13 +164,14 @@ class BaseDPMClassifier:
             For efficiency purposes in grid search.
         """
         global _match_filters # Urrrrrr
+        _match_filters = None
         # Initialize the model with a warping classifier, taking
         # high energy subwindows as parts.
         warp = WarpClassifier(
             self.feature,
             self.mindimdiv,
             C=self.C,
-            nb_iter=self.nb_coord_iter*self.nb_gd_iter,
+            nb_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
             inc_rate=self.inc_rate,
             dec_rate=self.dec_rate,
@@ -193,9 +207,10 @@ class BaseDPMClassifier:
         square_lead_dim = np.max(fmaps[0].shape[0:2])**2
         args = {
             'nb_samples': nb_samples,
+            'nb_classes': nb_classes,
             'fmaps': fmaps,
             'size': dpmsize,
-            'df': float(self.deform_factor) / square_lead_dim
+            'df': 1. / square_lead_dim
         }
 
         self.lmlr = LatentMLR(
@@ -204,7 +219,6 @@ class BaseDPMClassifier:
             args,
             initmodel,
             nb_samples=nb_samples,
-            nb_coord_iter=self.nb_coord_iter,
             nb_gd_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
             inc_rate=self.inc_rate,
@@ -224,7 +238,6 @@ class BaseDPMClassifier:
             for j in range(self.featdim):
                 fmaps_tensor[i,j] = fmaps[i][:,:,j]
         fmaps_shared = theano.shared(fmaps_tensor, 'fmaps')
-        _match_filters = match_filters(fmaps_shared)
             
         self.lmlr.train(fmaps_shared, labels, valid_fmaps, valid_labels)
         # Save the DPMs for visualization purposes.
@@ -238,35 +251,29 @@ class BaseDPMClassifier:
     def train(self, samples, labels, valid_samples=[], valid_labels=None):
         # Compute feature maps.
         if self.use_pca != None:
-            fmaps, newlabels, self.pca = random_windows_fmaps(
+            fmaps, self.nbrowfeat, self.nbcolfeat, self.pca = warped_fmaps_dimred(
                 samples,
-                labels,
                 self.mindimdiv,
-                self.nb_subwins,
                 self.feature,
-                size=0.7,
-                pca=self.use_pca
+                min_var=self.use_pca
             )
-            self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+            self.featdim = fmaps[0].shape[2]
             valid_fmaps = []
             if valid_labels != None or valid_samples == []:
                 valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, newlabels, valid_fmaps, valid_labels)
+            self._train(fmaps, labels, valid_fmaps, valid_labels)
         else:
-            fmaps, newlabels = random_windows_fmaps(
+            fmaps, self.nbrowfeat, self.nbcolfeat = warped_fmaps_simple(
                 samples,
-                labels,
                 self.mindimdiv,
-                self.nb_subwins,
-                self.feature,
-                size=0.7,
-                pca=None
+                self.feature
             )
-            self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+            self.pca = None
+            self.featdim = fmaps[0].shape[2]
             valid_fmaps = []
             if valid_labels != None or valid_samples == []:
                 valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, newlabels, valid_fmaps, valid_labels)
+            self._train(fmaps, labels, valid_fmaps, valid_samples)
 
     def test_fmaps(self, samples):
         nb_samples = len(samples)

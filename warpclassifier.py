@@ -78,11 +78,12 @@ class BaseWarpClassifier:
                 valid_fmaps = self.test_fmaps(valid_samples)
             self._train(fmaps, labels, valid_fmaps, valid_labels)
         else:
-            fmaps, self.nbrowfeat, self.nbcolfeat = random_windows_fmaps(
+            fmaps, self.nbrowfeat, self.nbcolfeat = warped_fmaps_simple(
                 samples,
                 self.mindimdiv,
                 self.feature
             )
+            self.pca = None
             self.featdim = fmaps[0].shape[2]
             valid_fmaps = []
             if valid_labels != None or valid_samples == []:

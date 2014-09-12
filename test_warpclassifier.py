@@ -54,7 +54,7 @@ class TestWarpClassifier(unittest.TestCase):
             mindimdiv,
             C,
             learning_rate=0.001,
-            nb_iter=100,
+            nb_iter=20,
             inc_rate=1.2,
             dec_rate=0.5,
             nb_subwins=10,
@@ -87,6 +87,8 @@ class TestWarpClassifier(unittest.TestCase):
                 nb_correct += 1
         print "top-1 accuracy:"
         print float(nb_correct) / len(testsamples)
+        print "top-1 to top-20 accuracy:"
+        print classifier.top_accuracy_named(testsamples, expected)
 
 if __name__ == "__main__":
     unittest.main()

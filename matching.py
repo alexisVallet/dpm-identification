@@ -8,7 +8,7 @@ import cv2
 from gdt import gdt2D
 from features import Feature
 
-def match_filters(fmaps_shared):
+def compile_match_filters(fmaps_shared):
     """ Returns the response maps of a set of linear filters on a set of feature maps.
         Curried for fmaps_shared, as it involves compiling a theano function which is
         expensive.
@@ -24,11 +24,14 @@ def match_filters(fmaps_shared):
         to the response of the filter when its center is positioned on
         this pixel.
     """
+    mode = theano.compile.get_default_mode()
+    mode = mode.including('conv_gemm')
     filters = T.tensor4('filters')
-    cross_corr_sym = T.nnet.conv2D(fmaps_shared, filters[:,:,::-1,::-1])
+    cross_corr_sym = T.nnet.conv2d(fmaps_shared, filters[:,:,::-1,::-1])
     cross_corr_fn = theano.function(
         [filters],
-        cross_corr_sym
+        cross_corr_sym,
+        mode=mode
     )
     def _helper(filters_list):
         # Convert filters into a proper 4D tensor for usage with theano.
@@ -41,9 +44,10 @@ def match_filters(fmaps_shared):
         for i in range(len(filters_list)):
             for j in range(dim):
                 filters_tensor[i,j] = filters_list[i][:,:,j]
-        return cross_corr_sym(filters_tensor)
+        return cross_corr_fn(filters_tensor)
+    return _helper
 
-def best_response_subwindow(fmap, response, anchor, deform, deform_factor):
+def best_response_subwindow(fmap, response, anchor, deform, partsize, deform_factor):
     """ Computes the best response subwindow and associated displacement from
         the anchor, taking into account deformation costs.
     """
@@ -51,11 +55,17 @@ def best_response_subwindow(fmap, response, anchor, deform, deform_factor):
     # optimal displacement. GDT expects deformation costs in dx, dy, 
     # dx^2, dy^2 format so we switch things around in deform accordingly.
     dy, dx, dy2, dx2 = deform
-    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), response,
-                     scaling=deform_factor)
+    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), response, scaling=deform_factor)
+    print deform
+    print deform_factor
+    print (df.min(), df.max(), df.mean())
+    cv2.namedWindow('input response', cv2.WINDOW_NORMAL)
+    cv2.namedWindow('gdt output', cv2.WINDOW_NORMAL)
+    cv2.imshow('input response', (response - response.min()) / (response.max() - response.min()))
+    cv2.imshow('gdt output', (df - df.min()) / (df.max() - df.min()))
+    cv2.waitKey(0)
     # Get the optimal position by looking up the args array
     anci, ancj = anchor
     di, dj = args[anci, ancj] - anchor
-    partsize = partfilter.shape[0]
 
     return (fmap[anci:anci+partsize,ancj:ancj+partsize], di, dj)

@@ -30,8 +30,7 @@ class BaseLatentMLR:
                  initbeta.astype(theano.config.floatX)),
                 axis=0
             ),
-            name='beta',
-            borrow=True
+            name='beta'
         )
         # Compile common theano functions.
         self.compile_funcs()
@@ -54,8 +53,7 @@ class BaseLatentMLR:
         self.nb_classes = params['nb_classes']
         self.beta = theano.shared(
             params['beta'],
-            name='beta',
-            borrow=True
+            name='beta'
         )
         self.compile_funcs()
 
@@ -81,11 +79,11 @@ class BaseLatentMLR:
 
     def train(self, samples, labels, valid_samples=[], valid_labels=None):
         # Check parameters.
-        assert labels.size == len(samples)
         for i in range(labels.size):
             assert labels[i] in range(self.nb_classes)
         # If nb_samples wasn't provided, assume samples is a list:
         nb_samples = len(samples) if self.nb_samples == None else self.nb_samples
+        assert nb_samples == labels.size
         # Set and compile the theano gradient descent update function.
         # The latent vectors are stored in a big 3D tensor.
         lat = theano.shared(
@@ -189,20 +187,12 @@ class BaseLatentMLR:
         nb_samples = len(samples)
         beta_value = self.beta.get_value()
         nb_featuresp1, nb_classes = beta_value.shape
-        test_latents = np.empty(
-            [nb_classes, nb_samples, nb_featuresp1 - 1],
-            dtype=theano.config.floatX
+        test_latents = self.latent_function(
+            beta_value[1:,:],
+            samples,
+            np.repeat([0], nb_samples), # don't care about the labels :p
+            self.latent_args
         )
-
-        # Compile all latent values for each class in the test_latents
-        # 3D tensor.
-        for l in range(nb_classes):
-            test_latents[l] = self.latent_function(
-                beta_value[1:,:],
-                samples,
-                np.repeat([l], nb_samples),
-                self.latent_args
-            )
 
         # Run the theano prediction function over it.
         return self._predict_proba(test_latents)
