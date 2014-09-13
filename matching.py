@@ -47,7 +47,7 @@ def compile_match_filters(fmaps_shared):
         return cross_corr_fn(filters_tensor)
     return _helper
 
-def best_response_subwindow(fmap, response, anchor, deform, partsize, deform_factor):
+def best_response_subwindow(fmap, response, anchor, deform, partsize, deform_factor, debug=False):
     """ Computes the best response subwindow and associated displacement from
         the anchor, taking into account deformation costs.
     """
@@ -62,6 +62,12 @@ def best_response_subwindow(fmap, response, anchor, deform, partsize, deform_fac
     resp_scale = 100. / response.std()
     gdt, args = gdt2D(resp_scale*np.array([dx, dy, dx2, dy2], np.float32), -resp_scale*response)
     df = -gdt
+    if debug:
+        cv2.namedWindow('resp', cv2.WINDOW_NORMAL)
+        cv2.namedWindow('gdt', cv2.WINDOW_NORMAL)
+        cv2.imshow('resp', (response - response.min()) / (response.max() - response.min()))
+        cv2.imshow('gdt', (df - df.min()) / (df.max() - df.min()))
+        cv2.waitKey(0)
     # Get the optimal position by taking the max. Screw the args array.
     anci, ancj = anchor
     maxi, maxj = np.unravel_index(np.argmax(df), df.shape)

@@ -54,7 +54,7 @@ class TestWarpClassifier(unittest.TestCase):
             mindimdiv,
             C,
             learning_rate=0.001,
-            nb_iter=20,
+            nb_iter=50,
             inc_rate=1.2,
             dec_rate=0.5,
             nb_subwins=10,

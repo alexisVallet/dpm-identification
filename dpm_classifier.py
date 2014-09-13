@@ -35,9 +35,11 @@ def _init_dpm(warpmap, nbparts, partsize):
 
 # Ugly hack.
 _match_filters = None
+_debug = False
 
 def _best_matches(beta, fmaps_shared, labels, args):
     global _match_filters
+    global _debug
     nb_features, nb_classes = beta.shape
     nb_samples = args['nb_samples']
     fmaps = args['fmaps']
@@ -76,9 +78,9 @@ def _best_matches(beta, fmaps_shared, labels, args):
                     dpms[j].anchors[k],
                     dpms[j].deforms[k],
                     partsize,
-                    deform_factor
+                    deform_factor,
+                    debug=_debug
                 )
-                
                 subwins.append((subwin, di, dj))
                 
             subwins_per_class.append(subwins)
@@ -118,7 +120,7 @@ def _best_matches(beta, fmaps_shared, labels, args):
                 offset = offset+4
             assert offset == nb_features
             latents[j,i] = latvec
-    return latents
+    return (latents, np.zeros([nb_classes, nb_samples], theano.config.floatX))
 
 class BaseDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial
@@ -297,7 +299,11 @@ class BaseDPMClassifier:
             return fmaps
 
     def predict_proba(self, samples):
-        return self.lmlr.predict_proba(self.test_fmaps(samples))
+        global _debug
+        _debug = True
+        probas = self.lmlr.predict_proba(self.test_fmaps(samples))
+        _debug = False
+        return probas
 
     def predict(self, samples):
         return self.lmlr.predict(self.test_fmaps(samples))
