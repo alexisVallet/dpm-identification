@@ -131,14 +131,6 @@ class BaseLatentMLR:
             grad
         )
         # Perform the first iteration "manually", to initialize prev_grad properly.
-        new_lat = np.empty(
-            [self.nb_classes, nb_samples, self.nb_features],
-            dtype=theano.config.floatX
-        )
-        new_lat_cst = np.empty(
-            [self.nb_classes, self.nb_features],
-            dtype=theano.config.floatX
-        )
         new_lat, new_lat_cst = self.latent_function(
             self.beta.get_value()[1:,:],
             samples,

@@ -20,7 +20,6 @@ class DPM:
                     coefficients.
         """
         assert len(parts) == len(anchors)
-        assert len(parts) == len(deforms)
 
         self.parts = parts
         self.anchors = anchors
@@ -42,6 +41,12 @@ class DPM:
 
         return np.concatenate(toconcat)
 
+    def tovector_nodeform(self):
+        """ Computes a vector representation suitable for classification,
+            discarding deformation coefficients.
+        """
+        return np.concatenate(map(lambda f: f.flatten('C'), self.parts))
+    
     def size(self):
         """ Returns a DPMSize object describing the size of the DPM object,
             i.e. the information which should be unchanged by training the
@@ -150,6 +155,9 @@ class DPMSize:
     def vectorsize(self):
         return int(np.sum(map(lambda ps: np.prod(ps),self.partshapes)) +
                    len(self.partshapes) * 4)
+
+    def vectorsize_nodeform(self):
+        return int(np.sum(map(lambda ps: np.prod(ps),self.partshapes)))
 
     def __repr__(self):
         return "%s(%r)" % (self.__class__, self.__dict__)

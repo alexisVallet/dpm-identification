@@ -35,12 +35,12 @@ def _init_dpm(warpmap, nbparts, partsize):
 
 # Ugly hack.
 _match_filters = None
-_debug = False
 
 def _best_matches(beta, fmaps_shared, labels, args):
     global _match_filters
     global _debug
     nb_features, nb_classes = beta.shape
+    deform_coeffs = args['deform_coeffs']
     nb_samples = args['nb_samples']
     fmaps = args['fmaps']
     dpm_size = args['size']
@@ -76,10 +76,9 @@ def _best_matches(beta, fmaps_shared, labels, args):
                     fmaps[i],
                     responses_tensor[i,j*nb_parts+k],
                     dpms[j].anchors[k],
-                    dpms[j].deforms[k],
+                    deform_coeffs,
                     partsize,
-                    deform_factor,
-                    debug=_debug
+                    deform_factor
                 )
                 subwins.append((subwin, di, dj))
                 
@@ -90,6 +89,11 @@ def _best_matches(beta, fmaps_shared, labels, args):
     # shaped tensor so latent MLR can properly work with it.
     latents = np.empty(
         [nb_classes, nb_samples, nb_features],
+        theano.config.floatX
+    )
+    # The latent constant contains negative deformation costs.
+    lat_cst = np.empty(
+        [nb_classes, nb_samples],
         theano.config.floatX
     )
 
@@ -113,26 +117,30 @@ def _best_matches(beta, fmaps_shared, labels, args):
                 flatwin = subwin.flatten('C')
                 latvec[offset:offset+flatwin.size] = flatwin
                 offset += flatwin.size
-            # Introduce the part displacements.
-            for disp in scaled_disp:
-                di, dj = disp
-                latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
-                offset = offset+4
             assert offset == nb_features
             latents[j,i] = latvec
-    return (latents, np.zeros([nb_classes, nb_samples], theano.config.floatX))
+            # Deformation costs.
+            def_cost = 0
+            dx, dy, dx2, dy2 = deform_coeffs
+            for disp in scaled_disp:
+                di, dj = disp
+                def_cost += di*dy + dj*dx + di**2*dy2 + dj**2*dx2
+            lat_cst[j,i] = -def_cost
+    return (latents, lat_cst)
 
 class BaseDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial
         logistic regression.
     """
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
-                 mindimdiv=10, nbparts=4, nb_gd_iter=100, learning_rate=0.001,
+                 mindimdiv=10, nbparts=4, deform_coeffs=[0,0,0.01,0.01],
+                 nb_gd_iter=100, learning_rate=0.001,
                  inc_rate=1.2, dec_rate=0.5, use_pca=None, verbose=False):
         self.C = C
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.nbparts = nbparts
+        self.deform_coeffs = deform_coeffs
         self.inc_rate = inc_rate
         self.dec_rate = dec_rate
         self.nb_gd_iter = nb_gd_iter
@@ -175,18 +183,19 @@ class BaseDPMClassifier:
 
         # Train the DPMs using latent MLR
         dpmsize = initdpms[0].size() # All DPMs should have the same size.
-        nb_features_dpm = dpmsize.vectorsize()
+        nb_features_dpm = dpmsize.vectorsize_nodeform()
         initmodel = np.empty([nb_features_dpm, nb_classes],
                              dtype=theano.config.floatX)
         
         for i in range(nb_classes):
-            initmodel[:,i] = initdpms[i].tovector()
+            initmodel[:,i] = initdpms[i].tovector_nodeform()
 
         # Set the deformation factor to the user supplied value, scaled
         # by 1 over the square leading feature map dimension to avoid
         # feature scaling issues in the gradient descent.
         square_lead_dim = np.max(fmaps[0].shape[0:2])**2
         args = {
+            'deform_coeffs': self.deform_coeffs,
             'nb_samples': nb_samples,
             'nb_classes': nb_classes,
             'fmaps': fmaps,
@@ -299,10 +308,7 @@ class BaseDPMClassifier:
             return fmaps
 
     def predict_proba(self, samples):
-        global _debug
-        _debug = True
         probas = self.lmlr.predict_proba(self.test_fmaps(samples))
-        _debug = False
         return probas
 
     def predict(self, samples):
