@@ -5,7 +5,7 @@ import cv2
 import theano
 from itertools import product
 
-from matching import match_part
+from matching import compile_batch_match, best_response_subwin
 from dpm import DPM, vectortodpm
 from warpclassifier import WarpClassifier
 from latent_mlr import LatentMLR
@@ -107,15 +107,79 @@ def _best_match_wrapper(modelvector, featmap, args):
 
     return latvec
 
+# Another hack to get around pickling restrictions.
+_batch_match = None
+
 def _best_matches(beta, fmaps, labels, args):
+    global _batch_match
+    # Compile the batch matching function if it hasn't already
+    # been done.
+    if _batch_match == None:
+        _batch_match = compile_batch_match(fmaps)
     nb_features, nb_classes = beta.shape
     nb_samples = len(fmaps)
-    latents = np.empty([nb_classes, nb_samples, nb_features],
-    dtype=theano.config.floatX)
-    for j in range(nb_classes):
-        for i in range(nb_samples):
-            latvec = _best_match_wrapper(beta[:,j], fmaps[i], args)
+    dpm_size = args['size']
+    deform_factor = args['df']
+
+    # Concatenate all the filters from all the DPMs into one big list
+    # for batch cross-correlation.
+    dpms = []
+    filters = []
+    for i in range(nb_classes):
+        dpm = vectortodpm(beta[:, i], dpm_size)
+        dpms.append(dpm)
+        filters += dpm.parts
+
+    # Run batch cross-correlation.
+    responses = _batch_match(filters)
+
+    # Compute the corresponding subwindows and displacements for each
+    # part of each DPM on each sample using GDT, and store the corresponding
+    # latent vectors into the 4D tensor required by latent MLR.
+    nb_parts = len(dpms[0].parts)
+    latents = np.empty(
+        [nb_classes, nb_samples, nb_features],
+        dtype=theano.config.floatX
+    )
+    partsize = dpms[0].parts[0].shape[0]
+    
+    for i in range(nb_samples):
+        for j in range(nb_classes):
+            subwins_and_disps = []
+            for k in range(nb_parts):
+                # Compute the subwindow and corresponding displacement.
+                subwin_and_disp = best_response_subwin(
+                    responses[i,j*nb_parts + k,:,:],
+                    fmaps[i],
+                    dpms[j].anchors[k],
+                    dpms[j].deforms[k],
+                    deform_factor,
+                    partsize,
+                    debug=False
+                )
+                subwins_and_disps.append(subwin_and_disp)
+            # Put the computed latent values into a proper latent vector.
+            latvec = np.empty([nb_features])
+            offset = 0
+            subwins = [sad[0] for sad in subwins_and_disps]
+            # Introduce the deformation factor into the displacements.
+            disps = [(float(sad[1]) * deform_factor, float(sad[2]) * deform_factor)
+                     for sad in subwins_and_disps]
+            
+            # Flatten subwindows.
+            for subwin in subwins:
+                flatwin = subwin.flatten('C')
+                latvec[offset:offset+flatwin.size] = flatwin
+                offset += flatwin.size
+            # Introduce the part displacements, with deformation factor.
+            for disp in disps:
+                di, dj = disp
+                latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
+                offset = offset+4
+            assert offset == nb_features
+            # Put the computed latent vector into the tensor.
             latents[j,i] = latvec
+    
     return latents
 
 class BaseDPMClassifier:

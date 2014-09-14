@@ -8,14 +8,62 @@ from features import Feature
 import theano
 import theano.tensor as T
 
+def compile_batch_match(fmaps):
+    """ Compiles and returns a GPU batch matching function for a dataset
+        of feature maps held in a theano shared variable.
+
+    Arguments:
+        fmaps
+            list of feature maps to store into the shared variable.
+    Returns:
+        a python function taking as input a list of filters, applying them
+        to all feature maps exhaustively, returning a nb_fmaps by nb_filters
+        by resp_rows by resp_cols numpy array containing all the filter responses.
+    """
+    nb_fmaps = len(fmaps)
+    f_rows, f_cols, f_dim = fmaps[0].shape
+    
+    # Put the feature maps into a shared variable.
+    fmaps_tensor = np.empty(
+        [nb_fmaps, f_dim, f_rows, f_cols],
+        dtype=theano.config.floatX
+    )
+    for i in range(nb_fmaps):
+        for j in range(f_dim):
+            fmaps_tensor[i,j] = fmaps[i][:,:,j]
+    # Compile the theano function.
+    fmaps_shared = theano.shared(fmaps_tensor, 'fmaps')
+    filters = T.tensor4('filters')
+    mode = theano.compile.get_default_mode()
+    mode = mode.including('conv_gemm')
+    cross_corr_sym = T.nnet.conv2d(fmaps_shared, filters[:,:,::-1,::-1])
+    cross_corr_fn = theano.function(
+        [filters],
+        cross_corr_sym,
+        mode=mode
+    )
+    def _helper(filters):
+        nb_filters = len(filters)
+        f_rows, f_cols, f_dim = filters[0].shape
+        # Convert the list of filters to the appropriate Theano data structure.
+        filters_tensor = np.empty(
+            [nb_filters, f_dim, f_rows, f_cols],
+            dtype=theano.config.floatX
+        )
+        for i in range(nb_filters):
+            for j in range(f_dim):
+                filters_tensor[i,j] = filters[i][:,:,j]
+        return cross_corr_fn(filters_tensor)
+    return _helper
+
 def _compile_crosscorr():
     mode = theano.compile.get_default_mode()
     mode = mode.including('conv_gemm')
-    fmap = T.tensor4('fmap')
-    filter_ = T.tensor4('filter')
-    cross_corr_sym = T.nnet.conv2d(fmap,filter_[:,:,::-1,::-1])
+    fmaps = T.tensor4('fmaps')
+    filters = T.tensor4('filters')
+    cross_corr_sym = T.nnet.conv2d(fmaps, filters[:,:,::-1,::-1])
     cross_corr_fn = theano.function(
-        [fmap, filter_],
+        [fmaps, filters],
         cross_corr_sym,
         mode=mode
     )
@@ -65,8 +113,7 @@ def match_filter(fmap, linfilter):
     
     return response.reshape([r_rows, r_cols])
 
-def match_part(fmap, partfilter, anchor, deform, 
-               deform_factor, debug=False):
+def best_response_subwin(response, fmap, anchor, deform, deform_factor, partsize, debug=False):
     """ Matches a DPM part against a feature map.
     
     Arguments:
@@ -80,8 +127,6 @@ def match_part(fmap, partfilter, anchor, deform,
         - subwin is the best matching subwindow from the original feature map.
         - di, dj is the displacement from the anchor position to the subwindow.
     """
-    # Compute the reponse of the filter.
-    response = match_filter(fmap, partfilter)
     if debug:
         respmin = response.min()
         respmax = response.max()
@@ -105,6 +150,5 @@ def match_part(fmap, partfilter, anchor, deform,
     # Get the optimal position by looking up the args array
     anci, ancj = anchor
     di, dj = args[anci, ancj] - anchor
-    partsize = partfilter.shape[0]
 
     return (fmap[anci:anci+partsize,ancj:ancj+partsize], di, dj)
