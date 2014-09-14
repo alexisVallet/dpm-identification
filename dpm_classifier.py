@@ -120,6 +120,7 @@ def _best_matches(beta, fmaps, labels, args):
     nb_samples = len(fmaps)
     dpm_size = args['size']
     deform_factor = args['df']
+    cst_deform = args['cst_deform']
 
     # Concatenate all the filters from all the DPMs into one big list
     # for batch cross-correlation.
@@ -141,6 +142,7 @@ def _best_matches(beta, fmaps, labels, args):
         [nb_classes, nb_samples, nb_features],
         dtype=theano.config.floatX
     )
+    lat_cst = np.zeros([nb_classes, nb_samples], theano.config.floatX)
     partsize = dpms[0].parts[0].shape[0]
     
     for i in range(nb_samples):
@@ -152,7 +154,7 @@ def _best_matches(beta, fmaps, labels, args):
                     responses[i,j*nb_parts + k,:,:],
                     fmaps[i],
                     dpms[j].anchors[k],
-                    dpms[j].deforms[k],
+                    dpms[j].deforms[k] if cst_deform == None else cst_deform,
                     deform_factor,
                     partsize,
                     debug=False
@@ -171,16 +173,24 @@ def _best_matches(beta, fmaps, labels, args):
                 flatwin = subwin.flatten('C')
                 latvec[offset:offset+flatwin.size] = flatwin
                 offset += flatwin.size
-            # Introduce the part displacements, with deformation factor.
-            for disp in disps:
-                di, dj = disp
-                latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
-                offset = offset+4
+            if cst_deform == None:
+                # Introduce the part displacements, with deformation factor.
+                for disp in disps:
+                    di, dj = disp
+                    latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
+                    offset = offset+4
+            else:
+                # Compute the deformation cost using the constant deformation
+                # coefficients.
+                for disp in disps:
+                    di, dj = disp
+                    dx, dy, dx2, dy2 = cst_deform
+                    lat_cst[j,i] -= dy*di + dx*dj + dy2*di**2 + dx2*dj**2
             assert offset == nb_features
             # Put the computed latent vector into the tensor.
             latents[j,i] = latvec
     
-    return (latents, np.zeros([nb_classes, nb_samples], theano.config.floatX))
+    return (latents, lat_cst)
 
 class BaseDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial
@@ -189,7 +199,7 @@ class BaseDPMClassifier:
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
                  mindimdiv=10, nbparts=4, deform_factor=1.,
                  nb_gd_iter=50, learning_rate=0.001,
-                 inc_rate=1.2, dec_rate=0.5, nb_subwins=20, use_pca=None, 
+                 inc_rate=1.2, dec_rate=0.5, cst_deform=None, use_pca=None, 
                  verbose=False):
         self.C = C
         self.feature = feature
@@ -200,7 +210,7 @@ class BaseDPMClassifier:
         self.dec_rate = dec_rate
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
-        self.nb_subwins = nb_subwins
+        self.cst_deform = cst_deform
         self.use_pca = use_pca
         self.verbose = verbose
 
@@ -229,7 +239,11 @@ class BaseDPMClassifier:
 
         for i in range(nb_classes):
             initdpms.append(
-                _init_dpm(warpmaps[i], self.nbparts, self.partsize)
+                _init_dpm(
+                    warpmaps[i],
+                    self.nbparts,
+                    self.partsize
+                )
             )
 
         nb_samples = len(fmaps)
@@ -237,12 +251,14 @@ class BaseDPMClassifier:
 
         # Train the DPMs using latent MLR
         dpmsize = initdpms[0].size() # All DPMs should have the same size.
-        nb_features_dpm = dpmsize.vectorsize()
+        nb_features_dpm = (dpmsize.vectorsize() if self.cst_deform == None
+                           else dpmsize.vectorsize_nodeform())
         initmodel = np.empty([nb_features_dpm, nb_classes],
                              dtype=theano.config.floatX)
         
         for i in range(nb_classes):
-            initmodel[:,i] = initdpms[i].tovector()
+            initmodel[:,i] = (initdpms[i].tovector() if self.cst_deform == None
+                              else initdpms[i].tovector_nodeform())
 
         # Set the deformation factor to the user supplied value, scaled
         # by 1 over the square leading feature map dimension to avoid
@@ -250,7 +266,8 @@ class BaseDPMClassifier:
         square_lead_dim = np.max(fmaps[0].shape[0:2])**2
         args = {
             'size': dpmsize,
-            'df': float(self.deform_factor) / square_lead_dim
+            'df': float(self.deform_factor) / square_lead_dim,
+            'cst_deform': self.cst_deform
         }
 
         self.lmlr = LatentMLR(
