@@ -180,7 +180,7 @@ def _best_matches(beta, fmaps, labels, args):
             # Put the computed latent vector into the tensor.
             latents[j,i] = latvec
     
-    return latents
+    return (latents, np.zeros([nb_classes, nb_samples], theano.config.floatX))
 
 class BaseDPMClassifier:
     """ Multi-class DPM classifier based on latent multinomial

@@ -65,16 +65,17 @@ class BaseLatentMLR:
         # each test sample. This format allows the use of theano's
         # batched_dot function to compute all the scores in one go.
         test_lat = T.tensor3('test_lat')
+        test_cst = T.matrix('test_cst')
         predict_proba_sym = (
-            T.nnet.softmax(T.batched_dot(test_lat, self.beta[1:,:].T).T 
-                           + self.beta[0,:])
+            T.nnet.softmax(T.batched_dot(test_lat, self.beta[1:,:].T).T
+                           + test_cst.T + self.beta[0,:])
         )
         self._predict_proba = theano.function(
-            [test_lat],
+            [test_lat, test_cst],
             predict_proba_sym
         )
         self._predict_label = theano.function(
-            [test_lat],
+            [test_lat, test_cst],
             T.argmax(predict_proba_sym, axis=1)
         )
 
@@ -86,16 +87,23 @@ class BaseLatentMLR:
 
         nb_samples = len(samples)
         # Set and compile the theano gradient descent update function.
+        # Tensor for latent vectors.
         lat = theano.shared(
             np.empty([self.nb_classes, nb_samples, self.nb_features],
                      dtype=theano.config.floatX),
             name='lat'
         )
+        # Tensor for latent constants.
+        lat_cst = theano.shared(
+            np.empty([self.nb_classes, nb_samples],
+                     dtype=theano.config.floatX),
+            name='lat_cst'
+        )
         # Cost function.
         regularization = (
             0.5 * T.dot(T.flatten(self.beta), T.flatten(self.beta))
         )
-        scores = T.batched_dot(lat, self.beta[1:,:].T).T + self.beta[0,:]
+        scores = T.batched_dot(lat, self.beta[1:,:].T).T + lat_cst.T + self.beta[0,:]
         losses = T.log(T.nnet.softmax(scores)[T.arange(nb_samples), labels])
         cost_sym = (
             regularization - self.C * T.sum(losses)
@@ -119,12 +127,14 @@ class BaseLatentMLR:
             grad
         )
         # Perform the first iteration "manually", to initialize prev_grad properly.
-        lat.set_value(self.latent_function(
+        lat_val, cst_val = self.latent_function(
             self.beta.get_value()[1:,:],
             samples,
             labels,
             self.latent_args
-        ))
+        )
+        lat.set_value(lat_val)
+        lat_cst.set_value(cst_val)
         init_grad = grad_f()
         self.beta.set_value(self.beta.get_value() - steps.get_value() 
                             * np.sign(init_grad))
@@ -161,12 +171,14 @@ class BaseLatentMLR:
         
         for t_gd in range(self.nb_gd_iter):
             # Compute the best negative latent vectors.
-            lat.set_value(self.latent_function(
+            lat_val, cst_val = self.latent_function(
                 self.beta.get_value()[1:,:],
                 samples,
                 labels,
                 self.latent_args
-            ))
+            )
+            lat.set_value(lat_val)
+            lat_cst.set_value(cst_val)
             cost_val, grad_norm = rprop_descent()
             if self.verbose:
                 print "Epoch " + repr(t_gd + 1)
@@ -182,7 +194,7 @@ class BaseLatentMLR:
         nb_samples = len(samples)
         beta_value = self.beta.get_value()
         nb_featuresp1, nb_classes = beta_value.shape
-        test_latents = self.latent_function(
+        test_lat, test_cst = self.latent_function(
             beta_value[1:,:],
             samples,
             np.repeat([0], nb_samples),
@@ -190,20 +202,20 @@ class BaseLatentMLR:
         )
 
         # Run the theano prediction function over it.
-        return self._predict_proba(test_latents)
+        return self._predict_proba(test_lat, test_cst)
 
     def predict(self, samples):
         nb_samples = len(samples)
         beta_value = self.beta.get_value()
         nb_featuresp1, nb_classes = beta_value.shape
-        test_latents = self.latent_function(
+        test_lat, test_cst = self.latent_function(
             beta_value[1:,:],
             samples,
             np.repeat([0], nb_samples),
             self.latent_args
         )            
 
-        return self._predict_label(test_latents)
+        return self._predict_label(test_lat, test_cst)
 
 class LatentMLR(BaseLatentMLR, ClassifierMixin):
     pass
@@ -218,7 +230,7 @@ def _dummy_latent(beta, samples, labels, args):
     stacked = np.vstack(samples)
     for i in range(nb_classes):
         latents[i] = stacked
-    return latents
+    return (latents, np.zeros([nb_classes, nb_samples], theano.config.floatX))
 
 class BaseMLR:
     """ Implementation of non-latent multinomial logistic regression based
