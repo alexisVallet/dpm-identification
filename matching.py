@@ -5,6 +5,23 @@ import cv2
 
 from gdt import gdt2D
 from features import Feature
+import theano
+import theano.tensor as T
+
+def _compile_crosscorr():
+    mode = theano.compile.get_default_mode()
+    mode = mode.including('conv_gemm')
+    fmap = T.tensor4('fmap')
+    filter_ = T.tensor4('filter')
+    cross_corr_sym = T.nnet.conv2d(fmap,filter_[:,:,::-1,::-1])
+    cross_corr_fn = theano.function(
+        [fmap, filter_],
+        cross_corr_sym,
+        mode=mode
+    )
+    return cross_corr_fn
+
+_cross_corr = _compile_crosscorr()
 
 def match_filter(fmap, linfilter):
     """ Returns the response map of a linear filter on a feature map.
@@ -22,22 +39,31 @@ def match_filter(fmap, linfilter):
         to the response of the filter when its center is positioned on
         this pixel.
     """
-    if fmap.shape[2] > 512:
-        raise ValueError("""
-Cannot compute cross-correlation for feature dimension greater than 512.
-This is a limitation in OpenCV. The future switch to GPU backend for cross
-correlations should hopefully fix this bug.
-        """)
-    fmap_ = fmap.astype(np.float32)
-    linfilter_ = linfilter.astype(np.float32)
-    # Run cross correlation of the filter on the map.
-    response = cv2.matchTemplate(
-        fmap_,
-        linfilter_,
-        method=cv2.TM_CCORR
+    f_rows, f_cols, f_dim = fmap.shape
+    l_rows, l_cols, l_dim = linfilter.shape
+    assert f_dim == l_dim
+    assert l_rows <= f_rows and l_cols <= f_cols
+    # Putting it in the theano format.
+    fmap_ = np.empty(
+        [1, f_dim, f_rows, f_cols],
+        dtype=theano.config.floatX
+    )
+    linfilter_ = np.empty(
+        [1, l_dim, l_rows, l_cols],
+        dtype=theano.config.floatX
     )
 
-    return response
+    for i in range(f_dim):
+        fmap_[0,i] = fmap[:,:,i]
+        linfilter_[0,i] = linfilter[:,:,i]
+    
+    # Run cross correlation of the filter on the map.
+    response = _cross_corr(fmap_, linfilter_)
+    nb_resp, nb_filters, r_rows, r_cols = response.shape
+    assert nb_resp == 1
+    assert nb_filters == 1
+    
+    return response.reshape([r_rows, r_cols])
 
 def match_part(fmap, partfilter, anchor, deform, 
                deform_factor, debug=False):
