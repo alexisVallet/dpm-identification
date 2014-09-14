@@ -37,7 +37,7 @@ class TestDPMClassifier(unittest.TestCase):
             HoG(9,1)
         )
         mindimdiv = 10
-        C = 0.01
+        C = 0.1
         nbparts = 4
         deform_factor = 1.
         classifier = DPMClassifier(
@@ -46,9 +46,8 @@ class TestDPMClassifier(unittest.TestCase):
             mindimdiv,
             nbparts,
             deform_factor,
-            nb_coord_iter=5,
-            nb_gd_iter=10,
-            learning_rate=0.0001,
+            nb_gd_iter=25,
+            learning_rate=0.001,
             inc_rate=1.2,
             dec_rate=0.5,
             nb_subwins=1,

@@ -9,7 +9,7 @@ from matching import match_part
 from dpm import DPM, vectortodpm
 from warpclassifier import WarpClassifier
 from latent_mlr import LatentMLR
-from features import max_energy_subwindow, warped_fmaps_simple, Combine, BGRHist, HoG
+from features import max_energy_subwindow, warped_fmaps_simple, warped_fmaps_dimred, Combine, BGRHist, HoG
 from classifier import ClassifierMixin
 from dataset_transform import random_windows_fmaps
 
@@ -110,11 +110,12 @@ def _best_match_wrapper(modelvector, featmap, args):
 def _best_matches(beta, fmaps, labels, args):
     nb_features, nb_classes = beta.shape
     nb_samples = len(fmaps)
-    latents = np.empty([nb_samples, nb_features],
+    latents = np.empty([nb_classes, nb_samples, nb_features],
     dtype=theano.config.floatX)
-    for i in range(nb_samples):
-        latvec = _best_match_wrapper(beta[:,labels[i]], fmaps[i], args)
-        latents[i] = latvec
+    for j in range(nb_classes):
+        for i in range(nb_samples):
+            latvec = _best_match_wrapper(beta[:,j], fmaps[i], args)
+            latents[j,i] = latvec
     return latents
 
 class BaseDPMClassifier:
@@ -123,7 +124,7 @@ class BaseDPMClassifier:
     """
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
                  mindimdiv=10, nbparts=4, deform_factor=1.,
-                 nb_coord_iter=4, nb_gd_iter=25, learning_rate=0.001,
+                 nb_gd_iter=50, learning_rate=0.001,
                  inc_rate=1.2, dec_rate=0.5, nb_subwins=20, use_pca=None, 
                  verbose=False):
         self.C = C
@@ -133,7 +134,6 @@ class BaseDPMClassifier:
         self.deform_factor = deform_factor
         self.inc_rate = inc_rate
         self.dec_rate = dec_rate
-        self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
         self.nb_subwins = nb_subwins
@@ -150,7 +150,7 @@ class BaseDPMClassifier:
             self.feature,
             self.mindimdiv,
             C=self.C,
-            nb_iter=self.nb_coord_iter*self.nb_gd_iter,
+            nb_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
             inc_rate=self.inc_rate,
             dec_rate=self.dec_rate,
@@ -194,7 +194,6 @@ class BaseDPMClassifier:
             _best_matches,
             args,
             initmodel,
-            nb_coord_iter=self.nb_coord_iter,
             nb_gd_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
             inc_rate=self.inc_rate,
@@ -211,37 +210,31 @@ class BaseDPMClassifier:
             )
 
     def train(self, samples, labels, valid_samples=[], valid_labels=None):
-        # Compute feature maps.
+                # Compute feature maps.
         if self.use_pca != None:
-            fmaps, newlabels, self.pca = random_windows_fmaps(
+            fmaps, self.nbrowfeat, self.nbcolfeat, self.pca = warped_fmaps_dimred(
                 samples,
-                labels,
                 self.mindimdiv,
-                self.nb_subwins,
                 self.feature,
-                size=0.7,
-                pca=self.use_pca
+                min_var=self.use_pca
             )
-            self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+            self.featdim = fmaps[0].shape[2]
             valid_fmaps = []
             if valid_labels != None or valid_samples == []:
                 valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, newlabels, valid_fmaps, valid_labels)
+            self._train(fmaps, labels, valid_fmaps, valid_labels)
         else:
-            fmaps, newlabels = random_windows_fmaps(
+            fmaps, self.nbrowfeat, self.nbcolfeat = warped_fmaps_simple(
                 samples,
-                labels,
                 self.mindimdiv,
-                self.nb_subwins,
-                self.feature,
-                size=0.7,
-                pca=None
+                self.feature
             )
-            self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
+            self.pca = None
+            self.featdim = fmaps[0].shape[2]
             valid_fmaps = []
             if valid_labels != None or valid_samples == []:
                 valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, newlabels, valid_fmaps, valid_labels)
+            self._train(fmaps, labels, valid_fmaps, valid_samples)
 
     def test_fmaps(self, samples):
         nb_samples = len(samples)

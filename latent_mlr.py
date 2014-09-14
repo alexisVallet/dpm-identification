@@ -9,13 +9,12 @@ from classifier import ClassifierMixin
 
 class BaseLatentMLR:
     def __init__(self, C, latent_function, latent_args, initbeta,
-                 nb_coord_iter=1, nb_gd_iter=100, learning_rate=0.0001,
+                 nb_gd_iter=100, learning_rate=0.0001,
                  inc_rate=1.2, dec_rate=0.5, verbose=False):
         # Basic parameters.
         self.C = C
         self.latent_function = latent_function
         self.latent_args = latent_args
-        self.nb_coord_iter = nb_coord_iter
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
         self.dec_rate = dec_rate
@@ -87,34 +86,17 @@ class BaseLatentMLR:
 
         nb_samples = len(samples)
         # Set and compile the theano gradient descent update function.
-        lat_pos = theano.shared(
-            np.empty([nb_samples, self.nb_features],
+        lat = theano.shared(
+            np.empty([self.nb_classes, nb_samples, self.nb_features],
                      dtype=theano.config.floatX),
-            name='lat_pos'
-        )
-        lat_neg = theano.shared(
-            np.empty([nb_samples, self.nb_features],
-                     dtype=theano.config.floatX),
-            name='lat_neg'
+            name='lat'
         )
         # Cost function.
         regularization = (
             0.5 * T.dot(T.flatten(self.beta), T.flatten(self.beta))
         )
-        
-        posdot = (T.dot(lat_pos, self.beta[1:,:]) + self.beta[0,:])[
-            T.arange(nb_samples), 
-            labels
-        ]
-        losses = T.log(
-            T.exp(posdot) /
-            T.reshape(
-                T.exp(T.dot(lat_neg, self.beta[1:,:]) + self.beta[0,:]).sum(
-                    axis=1,
-                    keepdims=True
-                ),
-                (nb_samples,))
-        )
+        scores = T.batched_dot(lat, self.beta[1:,:].T).T + self.beta[0,:]
+        losses = T.log(T.nnet.softmax(scores)[T.arange(nb_samples), labels])
         cost_sym = (
             regularization - self.C * T.sum(losses)
         )
@@ -137,6 +119,12 @@ class BaseLatentMLR:
             grad
         )
         # Perform the first iteration "manually", to initialize prev_grad properly.
+        lat.set_value(self.latent_function(
+            self.beta.get_value()[1:,:],
+            samples,
+            labels,
+            self.latent_args
+        ))
         init_grad = grad_f()
         self.beta.set_value(self.beta.get_value() - steps.get_value() 
                             * np.sign(init_grad))
@@ -169,70 +157,24 @@ class BaseLatentMLR:
             [cost_sym, grad.norm(2)],
             updates=updates
         )
-        new_lat_pos = np.empty(
-            [nb_samples, self.nb_features],
-            dtype=theano.config.floatX
-        )
-        new_lat_neg = np.empty(
-            [nb_samples, self.nb_features],
-            dtype=theano.config.floatX
-        )
         eps = 10E-3
-        t = 1
-        prev_err_rate = None
-        prev_model = None
         
-        # Running the usual coordinate descent.
-        for t_coord in range(self.nb_coord_iter):
-            # Compute the best positive latent vectors.
-            new_lat_pos = self.latent_function(
+        for t_gd in range(self.nb_gd_iter):
+            # Compute the best negative latent vectors.
+            lat.set_value(self.latent_function(
                 self.beta.get_value()[1:,:],
                 samples,
                 labels,
                 self.latent_args
-            )
-            lat_pos.set_value(new_lat_pos)
-            # Actual descent, stopping after a given number of iterations or when the
-            # gradient norm is close to zero.
-            for t_gd in range(self.nb_gd_iter):
-                # Compute the best negative latent vectors.
-                new_lat_neg = self.latent_function(
-                    self.beta.get_value()[1:,:],
-                    samples,
-                    labels,
-                    self.latent_args
-                )
-                lat_neg.set_value(new_lat_neg)
-                cost_val, grad_norm = rprop_descent()
-                if self.verbose:
-                    print "Epoch " + repr(t_gd + 1)
-                    print "Cost: " + repr(cost_val)
-                    print "Gradient norm: " + repr(grad_norm)
-                    print "Mean step size: " + repr(steps.get_value().mean())
-                if grad_norm <= eps:
-                    break
-                # Early stopping: every 10 epochs, measures error rate on the
-                # validation set. If higher than previous measure, stop learning.
-                if t % 10 == 0 and valid_samples != []:
-                    predicted = self.predict(valid_samples)
-                    nb_incorrect = 0
-
-                    for i in range(len(valid_samples)):
-                        if predicted[i] != valid_labels[i]:
-                            nb_incorrect += 1
-                    err_rate = float(nb_incorrect) / len(valid_samples) 
-                    if prev_err_rate == None or prev_err_rate > err_rate:
-                        prev_err_rate = err_rate
-                        prev_model = self.beta.get_value()
-                    elif err_rate > prev_err_rate:
-                        if self.verbose:
-                            print "Early stopping"
-                            print "Validation err rate: " + repr(prev_err_rate)
-                        self.beta.set_value(prev_model)
-                        self.intercept_ = prev_model[0,:]
-                        self.coef_ = prev_model[1:,:]
-                        return
-                t += 1
+            ))
+            cost_val, grad_norm = rprop_descent()
+            if self.verbose:
+                print "Epoch " + repr(t_gd + 1)
+                print "Cost: " + repr(cost_val)
+                print "Gradient norm: " + repr(grad_norm)
+                print "Mean step size: " + repr(steps.get_value().mean())
+            if grad_norm <= eps:
+                break
         self.intercept_ = self.beta.get_value()[0,:]
         self.coef_ = self.beta.get_value()[1:,:]
 
@@ -240,20 +182,12 @@ class BaseLatentMLR:
         nb_samples = len(samples)
         beta_value = self.beta.get_value()
         nb_featuresp1, nb_classes = beta_value.shape
-        test_latents = np.empty(
-            [nb_classes, nb_samples, nb_featuresp1 - 1],
-            dtype=theano.config.floatX
+        test_latents = self.latent_function(
+            beta_value[1:,:],
+            samples,
+            np.repeat([0], nb_samples),
+            self.latent_args
         )
-
-        # Compile all latent values for each class in the test_latents
-        # 3D tensor.
-        for l in range(nb_classes):
-            test_latents[l] = self.latent_function(
-                beta_value[1:,:],
-                samples,
-                np.repeat([l], nb_samples),
-                self.latent_args
-            )
 
         # Run the theano prediction function over it.
         return self._predict_proba(test_latents)
@@ -262,20 +196,12 @@ class BaseLatentMLR:
         nb_samples = len(samples)
         beta_value = self.beta.get_value()
         nb_featuresp1, nb_classes = beta_value.shape
-        test_latents = np.empty(
-            [nb_classes, nb_samples, nb_featuresp1 - 1],
-            dtype=theano.config.floatX
-        )
-
-        # Compile all latent values for each class in the test_latents
-        # 3D tensor.
-        for l in range(nb_classes):
-            test_latents[l] = self.latent_function(
-                beta_value[1:,:],
-                samples,
-                np.repeat([l], nb_samples),
-                self.latent_args
-            )
+        test_latents = self.latent_function(
+            beta_value[1:,:],
+            samples,
+            np.repeat([0], nb_samples),
+            self.latent_args
+        )            
 
         return self._predict_label(test_latents)
 
@@ -283,7 +209,16 @@ class LatentMLR(BaseLatentMLR, ClassifierMixin):
     pass
 
 def _dummy_latent(beta, samples, labels, args):
-    return np.vstack(samples)
+    nb_features, nb_classes = beta.shape
+    nb_samples = len(samples)
+    latents = np.empty(
+        [nb_classes, nb_samples, nb_features],
+        dtype=theano.config.floatX
+    )
+    stacked = np.vstack(samples)
+    for i in range(nb_classes):
+        latents[i] = stacked
+    return latents
 
 class BaseMLR:
     """ Implementation of non-latent multinomial logistic regression based
@@ -306,8 +241,7 @@ class BaseMLR:
                               np.zeros(
                                   [nb_features, nb_classes],
                                   dtype=theano.config.floatX
-                              ), 
-                              nb_coord_iter=1,
+                              ),
                               nb_gd_iter=self.nb_iter,
                               learning_rate=self.learning_rate,
                               inc_rate=self.inc_rate,

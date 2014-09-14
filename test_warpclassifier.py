@@ -57,7 +57,7 @@ class TestWarpClassifier(unittest.TestCase):
             nb_iter=100,
             inc_rate=1.2,
             dec_rate=0.5,
-            nb_subwins=10,
+            nb_subwins=1,
             verbose=True,
             use_pca=0.9
         )
@@ -79,7 +79,7 @@ class TestWarpClassifier(unittest.TestCase):
             for s in self.testdata[k]:
                 testsamples.append(s)
                 expected.append(k)
-        predicted = classifier.predict_averaged_named(testsamples)
+        predicted = classifier.predict_named(testsamples)
         nb_correct = 0
 
         for i in range(len(testsamples)):
