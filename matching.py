@@ -44,14 +44,15 @@ def compile_batch_match(fmaps):
     )
     def _helper(filters):
         nb_filters = len(filters)
-        f_rows, f_cols, f_dim = filters[0].shape
+        fi_rows, fi_cols, fi_dim = filters[0].shape
+        assert fi_dim == f_dim
         # Convert the list of filters to the appropriate Theano data structure.
         filters_tensor = np.empty(
-            [nb_filters, f_dim, f_rows, f_cols],
+            [nb_filters, fi_dim, fi_rows, fi_cols],
             dtype=theano.config.floatX
         )
         for i in range(nb_filters):
-            for j in range(f_dim):
+            for j in range(fi_dim):
                 filters_tensor[i,j] = filters[i][:,:,j]
         return cross_corr_fn(filters_tensor)
     return _helper

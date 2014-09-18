@@ -38,7 +38,7 @@ class TestDPMClassifier(unittest.TestCase):
         )
         mindimdiv = 10
         C = 0.1
-        nbparts = 4
+        nbparts = 8
         deform_factor = 1.
         classifier = DPMClassifier(
             C,
@@ -51,7 +51,7 @@ class TestDPMClassifier(unittest.TestCase):
             inc_rate=1.2,
             dec_rate=0.5,
             cst_deform=[0,0,0.1,0.1],
-            use_pca=0.9,
+            use_pca=None,
             verbose=True
         )
 

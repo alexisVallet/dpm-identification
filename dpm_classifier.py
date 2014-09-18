@@ -34,79 +34,6 @@ def _init_dpm(warpmap, nbparts, partsize):
         warpcopy[ai:ai+partsize,aj:aj+partsize] = 0
     return DPM(initparts, initanchors, initdeforms)
 
-def _best_match(dpm, featmap, deform_factor, debug=False):
-    """ Computes the best matching subwindows and corresponding
-        displacements of a root less deformable parts model on a
-        feature map.
-
-    Arguments:
-        dpm     deformable part model to match on the feature map.
-        featmap feature map to match the DPM on.
-
-    Returns:
-        (subwins, displacements) where:
-        - subwins is a list of k subwindows of the (possibly zero-padded)
-          input feature map, where k is the number is the number of parts
-          of the DPM. Corresponds to the best possible positioning of each
-          part.
-        - displacements is a list of k (di, dj) pairs corresponding to the
-          vertical (di) and horizonal (dj) of each optimal part position
-          compared to its anchor position.
-    """
-    winsanddisp = map(
-        lambda i: match_part(
-            featmap,
-            dpm.parts[i], 
-            dpm.anchors[i],
-            dpm.deforms[i],
-            deform_factor,
-            debug
-        ),
-        range(len(dpm.parts))
-    )
-    subwins = [res[0] for res in winsanddisp]
-    displacements = [res[1:3] for res in winsanddisp]
-    scaled_disp = []
-
-    for i in range(len(dpm.parts)):
-        di, dj = displacements[i]
-        scaled_disp.append(
-            (float(di) * deform_factor, float(dj) * deform_factor)
-        )
-
-    return (subwins, scaled_disp)
-
-def _best_match_wrapper(modelvector, featmap, args):
-    """ Wrapper to _best_match to convert everything into the proper
-        vector format.
-    """
-    modelsize = args['size']
-    deform_factor = args['df']
-
-    # Compute the best match on the converted model data structure.
-    (subwins, displacements) = _best_match(
-        vectortodpm(modelvector, modelsize),
-        featmap,
-        deform_factor
-    )
-
-    # Put the computed latent values into a proper latent vector.
-    latvec = np.empty([modelvector.size])
-    offset = 0
-    # Flatten subwindows.
-    for subwin in subwins:
-        flatwin = subwin.flatten('C')
-        latvec[offset:offset+flatwin.size] = flatwin
-        offset += flatwin.size
-    # Introduce the part displacements.
-    for disp in displacements:
-        di, dj = disp
-        latvec[offset:offset+4] = -np.array([di, dj, di**2, dj**2])
-        offset = offset+4
-    assert offset == modelvector.size
-
-    return latvec
-
 # Another hack to get around pickling restrictions.
 _batch_match = None
 
@@ -218,6 +145,9 @@ class BaseDPMClassifier:
         """ Training procedure which takes precomputed feature maps as inputs.
             For efficiency purposes in grid search.
         """
+        # Make sure we recompile the matching function.
+        global _batch_match
+        _batch_match = None
         # Initialize the model with a warping classifier, taking
         # high energy subwindows as parts.
         warp = WarpClassifier(

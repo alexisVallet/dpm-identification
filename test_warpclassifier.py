@@ -40,7 +40,9 @@ class TestWarpClassifier(unittest.TestCase):
             for s in self.traindata[l]:
                 trainsamples.append(s)
                 trainlabels.append(l)
-        
+
+        print len(trainsamples)
+                        
         # Run training.
         nbbins = (4,4,4)
         feature = Combine(
@@ -54,10 +56,9 @@ class TestWarpClassifier(unittest.TestCase):
             mindimdiv,
             C,
             learning_rate=0.001,
-            nb_iter=100,
+            nb_iter=50,
             inc_rate=1.2,
             dec_rate=0.5,
-            nb_subwins=1,
             verbose=True,
             use_pca=0.9
         )
