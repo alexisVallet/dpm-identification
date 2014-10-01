@@ -4,6 +4,9 @@ import os
 import numpy as np
 import cv2
 import json
+import os
+import os.path
+from scipy.ndimage import imread
 
 def load_data(imgfolder, bbfolder):
     # build the training data
@@ -31,3 +34,23 @@ def load_data(imgfolder, bbfolder):
         else:
             traindata[label].append(charimage)
     return traindata
+
+def load_data_pixiv(folder, names=None):
+    if names == None:
+        names = os.walk(folder).next()[1]
+    images = []
+    labels = []
+
+    for subfolder in names:
+        print "Loading for " + subfolder
+        imagefiles = [f for f in os.listdir(os.path.join(folder, subfolder))
+                      if f.endswith('.jpg')]
+        for imgfile in imagefiles:
+            image = cv2.imread(os.path.join(folder, subfolder, imgfile))
+            if image == None:
+                print "Error loading " + imgfile
+                raise Exception()
+            images.append(image)
+        labels += [subfolder] * len(imagefiles)
+    return (images, labels)
+        
