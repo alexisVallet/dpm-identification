@@ -29,7 +29,7 @@ class BaseWarpClassifier:
         self.nbrowfeat = None
         self.nbcolfeat = None
 
-    def _train(self, fmaps, labels, valid_fmaps=[], valid_labels=None):
+    def _train(self, fmaps, labels):
         """ Training procedure which takes precomputed feature maps as
             inputs. For efficiency purposes in grid search, and in the
             DPM classifier.
@@ -38,7 +38,6 @@ class BaseWarpClassifier:
         if None in (self.nbrowfeat, self.nbcolfeat, self.featdim):
             self.nbrowfeat, self.nbcolfeat, self.featdim = fmaps[0].shape
         fvecs = map(lambda f: f.flatten('C'), fmaps)
-        valid_fvecs = map(lambda f: f.flatten('C'), valid_fmaps)
 
         # Run multinomial logistic regression on it.
         self.lr = MLR(
@@ -49,7 +48,7 @@ class BaseWarpClassifier:
             dec_rate=self.dec_rate,
             verbose=self.verbose
         )
-        self.lr.train(fvecs, labels, valid_fvecs, valid_labels)
+        self.lr.train(fvecs, labels)
 
         # Store the learned "feature map" for each class in its proper 
         # shape.
@@ -62,7 +61,7 @@ class BaseWarpClassifier:
 
             self.model_featmaps.append(fmap)
 
-    def train(self, samples, labels, valid_samples=[], valid_labels=None):
+    def train(self, samples, labels):
         # Compute feature maps.
         if self.use_pca != None:
             fmaps, self.nbrowfeat, self.nbcolfeat, self.pca = warped_fmaps_dimred(
@@ -72,10 +71,7 @@ class BaseWarpClassifier:
                 min_var=self.use_pca
             )
             self.featdim = fmaps[0].shape[2]
-            valid_fmaps = []
-            if valid_labels != None or valid_samples == []:
-                valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, labels, valid_fmaps, valid_labels)
+            self._train(fmaps, labels)
         else:
             fmaps, self.nbrowfeat, self.nbcolfeat = warped_fmaps_simple(
                 samples,
@@ -84,10 +80,7 @@ class BaseWarpClassifier:
             )
             self.pca = None
             self.featdim = fmaps[0].shape[2]
-            valid_fmaps = []
-            if valid_labels != None or valid_samples == []:
-                valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, labels, valid_fmaps, valid_samples)
+            self._train(fmaps, labels)
 
     def test_fmaps(self, samples):
         nb_samples = len(samples)

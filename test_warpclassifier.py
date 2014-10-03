@@ -37,7 +37,7 @@ class TestWarpClassifier(unittest.TestCase):
         print "loading data..."
         images, labels = load_data_pixiv('data/pixiv-images-1000', names)
         print "finished loading data."
-        fold_samples, fold_labels = k_fold_split(images, labels, 2)
+        fold_samples, fold_labels = k_fold_split(images, labels, 3)
         cls.traindata = reduce(lambda l1,l2: l1 + l2, fold_samples[1:])
         cls.trainlabels = reduce(lambda l1,l2: l1 + l2, fold_labels[1:])
         cls.testdata = fold_samples[0]
@@ -52,11 +52,11 @@ class TestWarpClassifier(unittest.TestCase):
         # Run training.
         nbbins = (4,4,4)
         feature = Combine(
-            HoG(5, 1),
+            HoG(9, 0),
             BGRHist(nbbins, 0)
         )
-        mindimdiv = 8
-        C = 0.01
+        mindimdiv = 10
+        C = 0.1
         classifier = WarpClassifier(
             feature,
             mindimdiv,
@@ -66,7 +66,7 @@ class TestWarpClassifier(unittest.TestCase):
             inc_rate=1.2,
             dec_rate=0.5,
             verbose=True,
-            use_pca=0.8
+            use_pca=0.9
         )
 
         classifier.train_named(self.traindata, self.trainlabels)

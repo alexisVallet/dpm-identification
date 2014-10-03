@@ -35,6 +35,12 @@ class Combine(Feature):
     def __repr__(self):
         return "%s(%r)" % (self.__class__, self.__dict__)
 
+def uncompress(image):
+    if len(image.shape) < 2:
+        return cv2.imdecode(image, 1)
+    else:
+        return image
+    
 class BGRHist(Feature):
     """ Computes flattened and scaled BGR histograms as features.
     """
@@ -55,12 +61,14 @@ class BGRHist(Feature):
              np.prod(self.nbbins)],
             dtype=theano.config.floatX
         )
+        # Uncompress if necessary.
+        _image = uncompress(image)
         # Limits of color values. Takes the OpenCV convention:
         # 0-255 for uint8, [0;1] for float32.
-        assert image.dtype in [np.uint8, np.float32]
-        limits = (0,256) * 3 if image.dtype == np.uint8 else (0.,1.) * 3
+        assert _image.dtype in [np.uint8, np.float32]
+        limits = (0,256) * 3 if _image.dtype == np.uint8 else (0.,1.) * 3
 
-        for _cell in block_generator(image, 
+        for _cell in block_generator(_image, 
                                      n + self.block_halfsize*2, 
                                      m + self.block_halfsize*2):
             i, j, cell = _cell
@@ -90,11 +98,13 @@ class HoG(Feature):
         self.block_halfsize = block_halfsize
         self.dimension = nb_orient * (block_halfsize * 2 + 1)**2
 
-    def compute_featmap(self, image, n, m):
+    def compute_featmap(self, comp_image, n, m):
         """ Computes a feature map of flattened HoG features. The returned
             feature map is a map of blocks, which are themselves multiple
             concatenated cells normalized together.
         """
+        # Uncompress image if necessary.
+        image = uncompress(comp_image)
         assert image.dtype in [np.uint8, np.float32]
         # Convert image to grayscale, floating point.
         _image = None
@@ -178,6 +188,33 @@ class HoG(Feature):
     def __repr__(self):
         return "HoG(%r, %r)" % (self.nb_orient, self.block_halfsize)
 
+def pyramids(samples, max_dims, feature, min_var=None)
+    """ Compute feature pyramids for a bunch of samples, optionally applying
+        dimensionality reduction to the features. Returns them as lists of
+        feature maps for each sample.
+    """
+    nb_samples = len(samples)
+    nb_scales = len(max_dims)
+    # Compute all the feature maps at each scale.
+    fmaps_per_scale = []
+    shapes_per_scale = []
+    
+    for max_dim in max_dims:
+        fmaps, rows, cols = warped_fmap_simple(samples, max_dim, feature)
+        fmaps_per_scale.append(fmaps)
+        shapes_per_scale.append([rows, cols])
+
+    # Reshape this into a list of feature maps at each scale.
+    pyramids = []
+    
+    for i in range(nb_samples):
+        pyramid = []
+        for j in range(nb_scales):
+            pyramid.append(fmaps_per_scale[j][i])
+        pyramids.append(pyramid)
+
+    return pyramids
+     
 def block_generator(image, n, m):
     """ Returns a generator which iterates over non-overlapping blocks
         in a n by m grid in the input image. Blocks will be as close to
@@ -338,12 +375,18 @@ def warped_fmaps_dimred(samples, mindimdiv, feature, min_var=0.9):
         )
     return (fmaps_dimred, rows, cols, pca)
 
+def compute_mean_ar(samples):
+    def compute_ar(image):
+        # Uncompress image if necessary.
+        _image = uncompress(image)
+        return (float(_image.shape[1]) / _image.shape[0])
+    return np.mean(map(compute_ar, samples))
+
 def warped_fmaps_simple(samples, mindimdiv, feature):
     # Find out the average aspect ratio across
     # positive samples. Use that value to define
     # the feature map dimensions.
-    meanar = np.mean(map(lambda s: float(s.shape[1]) / s.shape[0],
-                         samples))
+    meanar = compute_mean_ar(samples)
     # Basic algebra to get the corresponding number of rows/cols
     # from the desired minimum dimension divisions.
     nbrowfeat = None
@@ -351,7 +394,7 @@ def warped_fmaps_simple(samples, mindimdiv, feature):
 
     if meanar > 1:
         nbrowfeat = mindimdiv
-        nbcolfeat = mindimdiv * meanar
+        nbcolfeat = int(mindimdiv * meanar)
     else:
         nbrowfeat = int(mindimdiv / meanar)
         nbcolfeat = mindimdiv

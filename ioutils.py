@@ -4,10 +4,9 @@ import os
 import numpy as np
 import cv2
 import json
-import os
 import os.path
 from scipy.ndimage import imread
-
+        
 def load_data(imgfolder, bbfolder):
     # build the training data
     imagefiles = [f for f in os.listdir(imgfolder)
@@ -36,9 +35,12 @@ def load_data(imgfolder, bbfolder):
     return traindata
 
 def load_data_pixiv(folder, names=None):
+    """ Loads data in the pixiv dataset format. Since it is usually too large to fit in
+        RAM uncompressed, this actually returns a CompressedImages object.
+    """
     if names == None:
         names = os.walk(folder).next()[1]
-    images = []
+    images_raw = []
     labels = []
 
     for subfolder in names:
@@ -46,11 +48,9 @@ def load_data_pixiv(folder, names=None):
         imagefiles = [f for f in os.listdir(os.path.join(folder, subfolder))
                       if f.endswith('.jpg')]
         for imgfile in imagefiles:
-            image = cv2.imread(os.path.join(folder, subfolder, imgfile))
-            if image == None:
-                print "Error loading " + imgfile
-                raise Exception()
-            images.append(image)
+            filename = os.path.join(folder, subfolder, imgfile)
+            with open(filename, 'rb') as img_raw:
+                images_raw.append(np.frombuffer(img_raw.read(), dtype=np.uint8))
         labels += [subfolder] * len(imagefiles)
-    return (images, labels)
+    return (images_raw, labels)
         

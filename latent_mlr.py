@@ -29,8 +29,7 @@ class BaseLatentMLR:
                  initbeta.astype(theano.config.floatX)),
                 axis=0
             ),
-            name='beta',
-            borrow=True
+            name='beta'
         )
         # Compile common theano functions.
         self.compile_funcs()
@@ -54,7 +53,6 @@ class BaseLatentMLR:
         self.beta = theano.shared(
             params['beta'],
             name='beta',
-            borrow=True
         )
         self.compile_funcs()
 
@@ -189,6 +187,9 @@ class BaseLatentMLR:
                 break
         self.intercept_ = self.beta.get_value()[0,:]
         self.coef_ = self.beta.get_value()[1:,:]
+        # Trick for Theano to free GPU memory, hopefully.
+        lat.set_value([[[]]])
+        lat_cst.set_value([[]])
 
     def predict_proba(self, samples):
         nb_samples = len(samples)

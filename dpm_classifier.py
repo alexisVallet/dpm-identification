@@ -141,7 +141,7 @@ class BaseDPMClassifier:
         self.use_pca = use_pca
         self.verbose = verbose
 
-    def _train(self, fmaps, labels, valid_fmaps=[], valid_labels=None):
+    def _train(self, fmaps, labels):
         """ Training procedure which takes precomputed feature maps as inputs.
             For efficiency purposes in grid search.
         """
@@ -160,7 +160,7 @@ class BaseDPMClassifier:
             dec_rate=self.dec_rate,
             verbose=self.verbose
         )
-        warp._train(fmaps, labels, valid_fmaps, valid_labels)
+        warp._train(fmaps, labels)
         warpmaps = warp.model_featmaps
 
         nb_classes = len(warpmaps)
@@ -211,7 +211,7 @@ class BaseDPMClassifier:
             dec_rate=self.dec_rate,
             verbose=self.verbose
         )
-        self.lmlr.train(fmaps, labels, valid_fmaps, valid_labels)
+        self.lmlr.train(fmaps, labels)
         # Save the DPMs for visualization purposes.
         self.dpms = []
 
@@ -220,7 +220,7 @@ class BaseDPMClassifier:
                 vectortodpm(self.lmlr.coef_[:,i], dpmsize)
             )
 
-    def train(self, samples, labels, valid_samples=[], valid_labels=None):
+    def train(self, samples, labels):
                 # Compute feature maps.
         if self.use_pca != None:
             fmaps, self.nbrowfeat, self.nbcolfeat, self.pca = warped_fmaps_dimred(
@@ -230,10 +230,7 @@ class BaseDPMClassifier:
                 min_var=self.use_pca
             )
             self.featdim = fmaps[0].shape[2]
-            valid_fmaps = []
-            if valid_labels != None or valid_samples == []:
-                valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, labels, valid_fmaps, valid_labels)
+            self._train(fmaps, labels)
         else:
             fmaps, self.nbrowfeat, self.nbcolfeat = warped_fmaps_simple(
                 samples,
@@ -242,10 +239,7 @@ class BaseDPMClassifier:
             )
             self.pca = None
             self.featdim = fmaps[0].shape[2]
-            valid_fmaps = []
-            if valid_labels != None or valid_samples == []:
-                valid_fmaps = self.test_fmaps(valid_samples)
-            self._train(fmaps, labels, valid_fmaps, valid_samples)
+            self._train(fmaps, labels)
 
     def test_fmaps(self, samples):
         nb_samples = len(samples)
