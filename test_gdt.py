@@ -15,9 +15,9 @@ class TestGDT(unittest.TestCase):
     def test_args(self):
         """ Tests consistency between the distance transform and the argmax indices.
         """
-        img = cv2.imread('data/figures/test_gdt.png', 
+        img = cv2.imread('data/images/source/asahina_mikuru_0.jpg', 
                          cv2.CV_LOAD_IMAGE_GRAYSCALE)
-        (dfimg, args) = gdt.gdt2D(np.array([0,0,0.01,0.01]), img)
+        (dfimg, args) = gdt.gdt2D(np.array([0,0,1,1]), img)
         cv2.imshow("gdt", (dfimg - dfimg.min()) / (dfimg.max() - dfimg.min()))
         cv2.waitKey(0)
         argdt = np.empty(img.shape, dtype=np.float32)

@@ -49,14 +49,10 @@ class TestDPMClassifier(unittest.TestCase):
         nbbins = (4,4,4)
         feature = Combine(
             BGRHist(nbbins, 0),
-            HoG(9,0)
+            HoG(9,1)
         )
         mindimdiv = 10
-<<<<<<< Updated upstream
-        C = 0.01
-=======
-        C = 0.1
->>>>>>> Stashed changes
+        C=0.1
         nbparts = 4
         deform_factor = 1.
         classifier = DPMClassifier(
@@ -69,8 +65,8 @@ class TestDPMClassifier(unittest.TestCase):
             learning_rate=0.001,
             inc_rate=1.2,
             dec_rate=0.5,
-            cst_deform=None,
-            use_pca=0.9,
+            cst_deform=[0,0,0.01,0.01],
+            use_pca=None,
             verbose=True
         )
 

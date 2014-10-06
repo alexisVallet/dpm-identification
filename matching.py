@@ -35,7 +35,7 @@ def compile_batch_match(fmaps):
     fmaps_shared = theano.shared(fmaps_tensor, 'fmaps')
     filters = T.tensor4('filters')
     mode = theano.compile.get_default_mode()
-    mode = mode.including('conv_gemm')
+    mode = mode.including('conv_fft_valid', 'conv_fft_full')
     cross_corr_sym = T.nnet.conv2d(fmaps_shared, filters[:,:,::-1,::-1])
     cross_corr_fn = theano.function(
         [filters],
@@ -59,7 +59,7 @@ def compile_batch_match(fmaps):
 
 def _compile_crosscorr():
     mode = theano.compile.get_default_mode()
-    mode = mode.including('conv_gemm')
+    mode = mode.including('conv_fft_valid', 'conv_fft_full')
     fmaps = T.tensor4('fmaps')
     filters = T.tensor4('filters')
     cross_corr_sym = T.nnet.conv2d(fmaps, filters[:,:,::-1,::-1])
@@ -114,7 +114,7 @@ def match_filter(fmap, linfilter):
     
     return response.reshape([r_rows, r_cols])
 
-def best_response_subwin(response, fmap, anchor, deform, deform_factor, partsize, debug=False):
+def best_response_subwin(response, fmap, anchor, deform, partsize, deform_factor, debug=False):
     """ Matches a DPM part against a feature map.
     
     Arguments:
@@ -142,9 +142,9 @@ def best_response_subwin(response, fmap, anchor, deform, deform_factor, partsize
     # Scale the response to a nice numerical range, so the GDT doesn't run
     # into stability issues. Scale up the deformation cost accordingly, so
     # the position of the max doesn't (theoretically) change.
-    up_scaling = 100. / response.std()
-    gdt, args = gdt2D(up_scaling * np.array([dx, dy, dx2, dy2]), -up_scaling * response,
-                      scaling=deform_factor)
+    up_scaling = 255. / response.max()
+    gdt, args = gdt2D(np.array([dx, dy, dx2, dy2]), -up_scaling * response,
+                      scaling=up_scaling * deform_factor)
     df = -gdt
     if debug:
         respmin = df.min()

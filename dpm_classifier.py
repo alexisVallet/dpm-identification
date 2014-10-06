@@ -82,8 +82,8 @@ def _best_matches(beta, fmaps, labels, args):
                     fmaps[i],
                     dpms[j].anchors[k],
                     dpms[j].deforms[k] if cst_deform == None else cst_deform,
-                    deform_factor,
                     partsize,
+                    deform_factor,
                     debug=False
                 )
                 subwins_and_disps.append(subwin_and_disp)
@@ -189,15 +189,11 @@ class BaseDPMClassifier:
         for i in range(nb_classes):
             initmodel[:,i] = (initdpms[i].tovector() if self.cst_deform == None
                               else initdpms[i].tovector_nodeform())
-
-        # Set the deformation factor to the user supplied value, scaled
-        # by 1 over the square leading feature map dimension to avoid
-        # feature scaling issues in the gradient descent.
         square_lead_dim = np.max(fmaps[0].shape[0:2])**2
         args = {
             'size': dpmsize,
-            'df': float(self.deform_factor) / square_lead_dim,
-            'cst_deform': self.cst_deform
+            'cst_deform': self.cst_deform,
+            'df': 1. / square_lead_dim
         }
 
         self.lmlr = LatentMLR(
