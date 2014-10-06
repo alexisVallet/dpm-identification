@@ -52,7 +52,11 @@ class TestDPMClassifier(unittest.TestCase):
             HoG(9,0)
         )
         mindimdiv = 10
+<<<<<<< Updated upstream
         C = 0.01
+=======
+        C = 0.1
+>>>>>>> Stashed changes
         nbparts = 4
         deform_factor = 1.
         classifier = DPMClassifier(

@@ -139,8 +139,13 @@ def best_response_subwin(response, fmap, anchor, deform, deform_factor, partsize
     # optimal displacement. GDT expects deformation costs in dx, dy, 
     # dx^2, dy^2 format so we switch things around in deform accordingly.
     dy, dx, dy2, dx2 = deform
-    df, args = gdt2D(np.array([dx, dy, dx2, dy2]), response,
-                     scaling=deform_factor)
+    # Scale the response to a nice numerical range, so the GDT doesn't run
+    # into stability issues. Scale up the deformation cost accordingly, so
+    # the position of the max doesn't (theoretically) change.
+    up_scaling = 100. / response.std()
+    gdt, args = gdt2D(up_scaling * np.array([dx, dy, dx2, dy2]), -up_scaling * response,
+                      scaling=deform_factor)
+    df = -gdt
     if debug:
         respmin = df.min()
         respmax = df.max()
@@ -152,4 +157,4 @@ def best_response_subwin(response, fmap, anchor, deform, deform_factor, partsize
     anci, ancj = anchor
     di, dj = args[anci, ancj] - anchor
 
-    return (fmap[anci:anci+partsize,ancj:ancj+partsize], di, dj)
+    return (fmap[anci+di:anci+di+partsize,ancj+dj:ancj+dj+partsize], di, dj)
