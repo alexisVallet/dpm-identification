@@ -13,39 +13,37 @@ from cross_validation import k_fold_split
 class TestDPMClassifier(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        names = [
-            "初音ミク",
-            "鏡音リン",
-            "本田菊",
-            "チルノ",
-            "鏡音レン",
-            "アーサー・カークランド",
-            "レミリア",
-            "暁美ほむら",
-            "アリス",
-            "霧雨魔理沙",
-            "ルーミア",
-            "黒子テツヤ",
-            "美樹さやか",
-            "巡音ルカ",
-            "ギルベルト・バイルシュミット",
-            "フランドール・スカーレット",
-            "坂田銀時",
-            "古明地こいし",
-            "東風谷早苗",
-            "アルフレッド・F・ジョーンズ"
-        ]
         print "loading data..."
-        images, labels = load_data_pixiv('data/pixiv-images-1000', names)
-        print "finished loading data."
-        fold_samples, fold_labels = k_fold_split(images, labels, 3)
-        cls.traindata = reduce(lambda l1,l2: l1 + l2, fold_samples[1:])
-        cls.trainlabels = reduce(lambda l1,l2: l1 + l2, fold_labels[1:])
-        cls.testdata = fold_samples[0]
-        cls.testlabels = fold_labels[0]
-        print repr(len(cls.traindata)) + " training samples"
-        print repr(len(cls.testdata)) + " test samples"
-        print repr(len(images)) + " total"
+        # Loads the training and testdata.
+        testdata = load_data(
+            'data/images/5-fold/0/positives/',
+            'data/json/boundingboxes/'
+        )
+        traindata = {}
+        for k in range(1,5):
+            folddata = load_data(
+                'data/images/5-fold/' + repr(k) + '/positives/',
+                'data/json/boundingboxes/'
+                )
+            for label in folddata:
+                if not label in traindata:
+                    traindata[label] = folddata[label]
+                else:
+                    traindata[label] += folddata[label]
+        cls.traindata = []
+        cls.trainlabels = []
+
+        for k in traindata:
+            for s in traindata[k]:
+                cls.traindata.append(s)
+                cls.trainlabels.append(k)
+        cls.testdata = []
+        cls.testlabels = []
+
+        for k in testdata:
+            for s in testdata[k]:
+                cls.testdata.append(s)
+                cls.testlabels.append(k)
 
     def test_binary_dpm_classifier(self):
         nbbins = (4,4,4)

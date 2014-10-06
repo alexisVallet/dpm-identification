@@ -188,7 +188,7 @@ class HoG(Feature):
     def __repr__(self):
         return "HoG(%r, %r)" % (self.nb_orient, self.block_halfsize)
 
-def pyramids(samples, max_dims, feature, min_var=None)
+def pyramids(samples, max_dims, feature, min_var=None):
     """ Compute feature pyramids for a bunch of samples, optionally applying
         dimensionality reduction to the features. Returns them as lists of
         feature maps for each sample.
