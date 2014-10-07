@@ -51,14 +51,14 @@ class TestDPMClassifier(unittest.TestCase):
             BGRHist(nbbins, 0),
             HoG(9,1)
         )
-        mindimdiv = 10
+        max_dims=[7,9,11,13]
         C=0.1
         nbparts = 4
         deform_factor = 1.
         classifier = DPMClassifier(
             C,
             feature,
-            mindimdiv,
+            max_dims,
             nbparts,
             deform_factor,
             nb_gd_iter=25,
@@ -66,7 +66,7 @@ class TestDPMClassifier(unittest.TestCase):
             inc_rate=1.2,
             dec_rate=0.5,
             cst_deform=[0,0,100000.,100000.],
-            use_pca=0.9,
+            use_pca=None,
             verbose=True
         )
 

@@ -13,7 +13,7 @@ from features import warped_fmaps_simple, warped_fmaps_dimred
 class BaseWarpClassifier:
     def __init__(self, feature=feat.BGRHist((4,4,4),0), mindimdiv=10, 
                  C=0.01, learning_rate=0.001, nb_iter=100, inc_rate=1.2, 
-                 dec_rate=0.5, use_pca=False, verbose=False):
+                 dec_rate=0.5, use_pca=None, verbose=False):
         self.feature = feature
         self.mindimdiv = mindimdiv
         self.C = C

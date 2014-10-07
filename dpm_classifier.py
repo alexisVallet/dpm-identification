@@ -9,7 +9,7 @@ from matching import compile_batch_match, best_response_subwin
 from dpm import DPM, vectortodpm
 from warpclassifier import WarpClassifier
 from latent_mlr import LatentMLR
-from features import max_energy_subwindow, warped_fmaps_simple, warped_fmaps_dimred, Combine, BGRHist, HoG
+from features import max_energy_subwindow, warped_fmaps_simple, warped_fmaps_dimred, Combine, BGRHist, HoG, compute_pyramids
 from classifier import ClassifierMixin
 from dataset_transform import random_windows_fmaps
 
@@ -26,7 +26,7 @@ def _init_dpm(warpmap, nbparts, partsize):
         # Take the highest energy subwindow as part, zero it out
         # in the feature map, and start again.
         (maxsubwin, (ai, aj)) = max_energy_subwindow(
-            warpcopy, 
+            warpcopy,
             partsize
         )
         initparts.append(warpmap[ai:ai+partsize,aj:aj+partsize])
@@ -37,17 +37,22 @@ def _init_dpm(warpmap, nbparts, partsize):
 # Another hack to get around pickling restrictions.
 _batch_match = None
 
-def _best_matches(beta, fmaps, labels, args):
+def _best_matches(beta, pyramids, labels, args):
     global _batch_match
-    # Compile the batch matching function if it hasn't already
-    # been done.
-    if _batch_match == None:
-        _batch_match = compile_batch_match(fmaps)
-    nb_features, nb_classes = beta.shape
-    nb_samples = len(fmaps)
     dpm_size = args['size']
     deform_factor = args['df']
     cst_deform = args['cst_deform']
+    max_dims = args['max_dims']
+    nb_samples = len(pyramids[0])
+    assert len(pyramids) == len(max_dims)
+    nb_scales = len(max_dims)
+    # Compile the batch matching function if it hasn't already
+    # been done. One matching function for each scale
+    if _batch_match == None:
+        _batch_match = []
+        for fmaps in pyramids:
+            _batch_match.append(compile_batch_match(fmaps))
+    nb_features, nb_classes = beta.shape
 
     # Concatenate all the filters from all the DPMs into one big list
     # for batch cross-correlation.
@@ -58,8 +63,10 @@ def _best_matches(beta, fmaps, labels, args):
         dpms.append(dpm)
         filters += dpm.parts
 
-    # Run batch cross-correlation.
-    responses = _batch_match(filters)
+    # Run batch cross-correlation for each individual scale.
+    responses_per_scale = []
+    for i in range(nb_scales):
+        responses_per_scale.append(_batch_match[i](filters))
 
     # Compute the corresponding subwindows and displacements for each
     # part of each DPM on each sample using GDT, and store the corresponding
@@ -71,22 +78,43 @@ def _best_matches(beta, fmaps, labels, args):
     )
     lat_cst = np.zeros([nb_classes, nb_samples], theano.config.floatX)
     partsize = dpms[0].parts[0].shape[0]
+    max_scale = np.max(max_dims)
     
     for i in range(nb_samples):
         for j in range(nb_classes):
             subwins_and_disps = []
             for k in range(nb_parts):
-                # Compute the subwindow and corresponding displacement.
-                subwin_and_disp = best_response_subwin(
-                    responses[i,j*nb_parts + k,:,:],
-                    fmaps[i],
-                    dpms[j].anchors[k],
-                    dpms[j].deforms[k] if cst_deform == None else cst_deform,
-                    partsize,
-                    deform_factor,
-                    debug=False
-                )
-                subwins_and_disps.append(subwin_and_disp)
+                max_score = None
+                max_score_subwin_disp = None
+                # Get the subwindows and displacements for the best matching scale.
+                for s in range(nb_scales):
+                    # Compute new anchors and deformation scaling for the current scale.
+                    response = responses_per_scale[s][i,j*nb_parts + k,:,:]
+                    scale_factor = float(max_dims[s]) / max_scale
+                    anci, ancj = np.floor(scale_factor * dpms[j].anchors[k]).astype(np.int32)
+                    frows, fcols = response.shape[0:2]
+                    # Clamp the scaled anchor just in case.
+                    anchors = np.array([max(0, min(frows-1, anci)),
+                                        max(0, min(fcols-1, ancj))])
+                    # Compute the subwindow and corresponding displacement.
+                    (score, subwin, di, dj) = best_response_subwin(
+                        response,
+                        fmaps[i],
+                        anchors,
+                        dpms[j].deforms[k] if cst_deform == None else cst_deform,
+                        partsize,
+                        deform_factor * scale_factor,
+                        debug=False
+                    )
+                    # Displacements need to be scaled back to original scale.
+                    scaled_disp = np.round(
+                        np.array([di, dj]).astype(np.float64) / scale_factor
+                    ).astype(np.int32)
+                    # Keep track of the best score.
+                    if max_score == None or score > max_score:
+                        max_score = score
+                        max_score_subwin_disp = (subwin, scaled_disp[0], scaled_disp[1])
+                subwins_and_disps.append(max_score_subwin_disp)
             # Put the computed latent values into a proper latent vector.
             latvec = np.empty([nb_features])
             offset = 0
@@ -124,13 +152,13 @@ class BaseDPMClassifier:
         logistic regression.
     """
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
-                 mindimdiv=10, nbparts=4, deform_factor=1.,
+                 max_dims=[5,7,9,11], nbparts=4, deform_factor=1.,
                  nb_gd_iter=50, learning_rate=0.001,
                  inc_rate=1.2, dec_rate=0.5, cst_deform=None, use_pca=None, 
                  verbose=False):
         self.C = C
         self.feature = feature
-        self.mindimdiv = mindimdiv
+        self.max_dims = max_dims
         self.nbparts = nbparts
         self.deform_factor = deform_factor
         self.inc_rate = inc_rate
@@ -141,7 +169,7 @@ class BaseDPMClassifier:
         self.use_pca = use_pca
         self.verbose = verbose
 
-    def _train(self, fmaps, labels):
+    def train(self, samples, labels):
         """ Training procedure which takes precomputed feature maps as inputs.
             For efficiency purposes in grid search.
         """
@@ -149,24 +177,27 @@ class BaseDPMClassifier:
         global _batch_match
         _batch_match = None
         # Initialize the model with a warping classifier, taking
-        # high energy subwindows as parts.
+        # high energy subwindows as parts. Scale is the rounded
+        # mean scale across all scales of feature pyramids.
+        warp_max_dim = int(round(np.mean(self.max_dims)))
         warp = WarpClassifier(
             self.feature,
-            self.mindimdiv,
+            warp_max_dim,
             C=self.C,
             nb_iter=self.nb_gd_iter,
             learning_rate=self.learning_rate,
             inc_rate=self.inc_rate,
             dec_rate=self.dec_rate,
+            use_pca=None,
             verbose=self.verbose
         )
-        warp._train(fmaps, labels)
+        warp.train(samples, labels)
         warpmaps = warp.model_featmaps
 
         nb_classes = len(warpmaps)
         initdpms = []
-        self.partsize = self.mindimdiv // 2
-
+        self.partsize = int(np.min(self.max_dims))
+        
         for i in range(nb_classes):
             initdpms.append(
                 _init_dpm(
@@ -176,8 +207,9 @@ class BaseDPMClassifier:
                 )
             )
 
-        nb_samples = len(fmaps)
-        nb_features = self.nbrowfeat * self.nbcolfeat * self.featdim
+        # Prepare feature pyramids.
+        pyramids = compute_pyramids(samples, self.max_dims, self.feature)
+        nb_samples = len(samples)
 
         # Train the DPMs using latent MLR
         dpmsize = initdpms[0].size() # All DPMs should have the same size.
@@ -189,11 +221,12 @@ class BaseDPMClassifier:
         for i in range(nb_classes):
             initmodel[:,i] = (initdpms[i].tovector() if self.cst_deform == None
                               else initdpms[i].tovector_nodeform())
-        square_lead_dim = np.max(fmaps[0].shape[0:2])**2
+        square_lead_dim = np.max(map(lambda pyrs: np.max(pyrs[0].shape[0:2]), pyramids))**2
         args = {
             'size': dpmsize,
             'cst_deform': self.cst_deform,
-            'df': 1. / square_lead_dim
+            'df': 1. / square_lead_dim,
+            'max_dims': self.max_dims
         }
 
         self.lmlr = LatentMLR(
@@ -205,9 +238,10 @@ class BaseDPMClassifier:
             learning_rate=self.learning_rate,
             inc_rate=self.inc_rate,
             dec_rate=self.dec_rate,
+            nb_samples=nb_samples,
             verbose=self.verbose
         )
-        self.lmlr.train(fmaps, labels)
+        self.lmlr.train(pyramids, labels)
         # Save the DPMs for visualization purposes.
         self.dpms = []
 
@@ -215,27 +249,6 @@ class BaseDPMClassifier:
             self.dpms.append(
                 vectortodpm(self.lmlr.coef_[:,i], dpmsize)
             )
-
-    def train(self, samples, labels):
-                # Compute feature maps.
-        if self.use_pca != None:
-            fmaps, self.nbrowfeat, self.nbcolfeat, self.pca = warped_fmaps_dimred(
-                samples,
-                self.mindimdiv,
-                self.feature,
-                min_var=self.use_pca
-            )
-            self.featdim = fmaps[0].shape[2]
-            self._train(fmaps, labels)
-        else:
-            fmaps, self.nbrowfeat, self.nbcolfeat = warped_fmaps_simple(
-                samples,
-                self.mindimdiv,
-                self.feature
-            )
-            self.pca = None
-            self.featdim = fmaps[0].shape[2]
-            self._train(fmaps, labels)
 
     def test_fmaps(self, samples):
         nb_samples = len(samples)

@@ -10,7 +10,7 @@ from classifier import ClassifierMixin
 class BaseLatentMLR:
     def __init__(self, C, latent_function, latent_args, initbeta,
                  nb_gd_iter=100, learning_rate=0.0001,
-                 inc_rate=1.2, dec_rate=0.5, verbose=False):
+                 inc_rate=1.2, dec_rate=0.5, nb_samples=None, verbose=False):
         # Basic parameters.
         self.C = C
         self.latent_function = latent_function
@@ -19,6 +19,7 @@ class BaseLatentMLR:
         self.learning_rate = learning_rate
         self.dec_rate = dec_rate
         self.inc_rate = inc_rate
+        self.nb_samples = nb_samples
         self.verbose = verbose
 
         # Theano shared variables and model information.
@@ -79,11 +80,10 @@ class BaseLatentMLR:
 
     def train(self, samples, labels, valid_samples=[], valid_labels=None):
         # Check parameters.
-        assert labels.size == len(samples)
         for i in range(labels.size):
             assert labels[i] in range(self.nb_classes)
 
-        nb_samples = len(samples)
+        nb_samples = len(samples) if isinstance(samples, list) else self.nb_samples
         # Set and compile the theano gradient descent update function.
         # Tensor for latent vectors.
         lat = theano.shared(
@@ -131,6 +131,10 @@ class BaseLatentMLR:
             labels,
             self.latent_args
         )
+        print (lat_val.shape, [self.nb_classes, nb_samples, self.nb_features])
+        print (cst_val.shape, [self.nb_classes, nb_samples])
+        assert lat_val.shape == (self.nb_classes, nb_samples, self.nb_features)
+        assert cst_val.shape == (self.nb_classes, nb_samples)
         lat.set_value(lat_val)
         lat_cst.set_value(cst_val)
         init_grad = grad_f()

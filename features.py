@@ -188,7 +188,7 @@ class HoG(Feature):
     def __repr__(self):
         return "HoG(%r, %r)" % (self.nb_orient, self.block_halfsize)
 
-def pyramids(samples, max_dims, feature, min_var=None):
+def compute_pyramids(samples, max_dims, feature, min_var=None):
     """ Compute feature pyramids for a bunch of samples, optionally applying
         dimensionality reduction to the features. Returns them as lists of
         feature maps for each sample.
@@ -197,23 +197,12 @@ def pyramids(samples, max_dims, feature, min_var=None):
     nb_scales = len(max_dims)
     # Compute all the feature maps at each scale.
     fmaps_per_scale = []
-    shapes_per_scale = []
     
     for max_dim in max_dims:
-        fmaps, rows, cols = warped_fmap_simple(samples, max_dim, feature)
+        fmaps, rows, cols = warped_fmaps_simple(samples, max_dim, feature)
         fmaps_per_scale.append(fmaps)
-        shapes_per_scale.append([rows, cols])
 
-    # Reshape this into a list of feature maps at each scale.
-    pyramids = []
-    
-    for i in range(nb_samples):
-        pyramid = []
-        for j in range(nb_scales):
-            pyramid.append(fmaps_per_scale[j][i])
-        pyramids.append(pyramid)
-
-    return pyramids
+    return fmaps_per_scale
      
 def block_generator(image, n, m):
     """ Returns a generator which iterates over non-overlapping blocks
@@ -329,16 +318,16 @@ def max_energy_subwindow(featmap, winsize):
     maxanchor = None
     maxsubwin = None
     maxenergy = 0
-    
-    for i in range(wrows - winsize):
-        for j in range(wcols - winsize):
+
+    for i in range(wrows - winsize + 1):
+        for j in range(wcols - winsize + 1):
             subwin = featmap[i:i+winsize,j:j+winsize]
             energy = np.vdot(subwin, subwin)
             if maxsubwin == None or maxenergy < energy:
                 maxanchor = (i,j)
                 maxenergy = energy
                 maxsubwin = subwin
-    
+
     return (np.array(maxsubwin, copy=True), maxanchor)
 
 def warped_fmaps_dimred(samples, mindimdiv, feature, min_var=0.9):
