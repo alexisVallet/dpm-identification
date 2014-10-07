@@ -143,7 +143,7 @@ def best_response_subwin(response, fmap, anchor, deform, partsize, deform_factor
     # into stability issues. Scale up the deformation cost accordingly, so
     # the position of the max doesn't (theoretically) change.
     up_scaling = 255. / response.max()
-    gdt, args = gdt2D(np.array([dx, dy, dx2, dy2]), -response,
+    gdt, args = gdt2D(up_scaling * np.array([dx, dy, dx2, dy2]), -up_scaling * response,
                       scaling=deform_factor)
     df = -gdt
     if debug:
