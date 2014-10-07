@@ -61,7 +61,7 @@ class TestDPMClassifier(unittest.TestCase):
             mindimdiv,
             nbparts,
             deform_factor,
-            nb_gd_iter=50,
+            nb_gd_iter=25,
             learning_rate=0.001,
             inc_rate=1.2,
             dec_rate=0.5,
