@@ -118,7 +118,7 @@ def best_response_subwin(response, fmap, anchor, deform, partsize, deform_factor
     """ Matches a DPM part against a feature map.
     
     Arguments:
-        fmap        feature map to match the part on.
+        fmap        feature map to match the tepart on.
         partfilter  linear filter of the part.
         anchor      numpy array in row,col order of the anchor point
                     of the center of the filter.
@@ -135,16 +135,16 @@ def best_response_subwin(response, fmap, anchor, deform, partsize, deform_factor
         cv2.namedWindow('response', cv2.WINDOW_NORMAL)
         cv2.imshow('response', (response - respmin) / (respmax - respmin))
         cv2.waitKey(0)
-    # Run GDT to compute score taking deformations into account and 
-    # optimal displacement. GDT expects deformation costs in dx, dy, 
+    # Run GDT to compute score taking deformations into account and
+    # optimal displacement. GDT expects deformation costs in dx, dy,
     # dx^2, dy^2 format so we switch things around in deform accordingly.
     dy, dx, dy2, dx2 = deform
     # Scale the response to a nice numerical range, so the GDT doesn't run
     # into stability issues. Scale up the deformation cost accordingly, so
     # the position of the max doesn't (theoretically) change.
     up_scaling = 255. / response.max()
-    gdt, args = gdt2D(np.array([dx, dy, dx2, dy2]), -up_scaling * response,
-                      scaling=up_scaling * deform_factor)
+    gdt, args = gdt2D(np.array([dx, dy, dx2, dy2]), -response,
+                      scaling=deform_factor)
     df = -gdt
     if debug:
         respmin = df.min()

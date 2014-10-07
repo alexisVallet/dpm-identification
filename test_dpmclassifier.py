@@ -65,8 +65,8 @@ class TestDPMClassifier(unittest.TestCase):
             learning_rate=0.001,
             inc_rate=1.2,
             dec_rate=0.5,
-            cst_deform=[0,0,0.01,0.01],
-            use_pca=None,
+            cst_deform=[0,0,100000.,100000.],
+            use_pca=0.9,
             verbose=True
         )
 
