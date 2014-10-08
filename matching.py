@@ -156,7 +156,7 @@ def best_response_subwin(response, fmap, anchor, deform, partsize, deform_factor
     # Get the optimal position by looking up the args array
     anci, ancj = anchor
     di, dj = args[anci, ancj] - anchor
-    # Get the score by unscaling the result at the position of the anchor.
+    # Get the score by unscaling the result at the position of the max around the anchor.
     score = df[anci,ancj] / up_scaling
 
     return (score, fmap[anci+di:anci+di+partsize,ancj+dj:ancj+dj+partsize], di, dj)

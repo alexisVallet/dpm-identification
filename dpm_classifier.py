@@ -79,6 +79,7 @@ def _best_matches(beta, pyramids, labels, args):
     lat_cst = np.zeros([nb_classes, nb_samples], theano.config.floatX)
     partsize = dpms[0].parts[0].shape[0]
     max_scale = np.max(max_dims)
+    scale_choices = np.zeros([nb_scales])
     
     for i in range(nb_samples):
         for j in range(nb_classes):
@@ -113,8 +114,9 @@ def _best_matches(beta, pyramids, labels, args):
                     # Keep track of the best score.
                     if max_score == None or score > max_score:
                         max_score = score
-                        max_score_subwin_disp = (subwin, scaled_disp[0], scaled_disp[1])
-                subwins_and_disps.append(max_score_subwin_disp)
+                        max_score_subwin_disp = (subwin, scaled_disp[0], scaled_disp[1], s)
+                subwins_and_disps.append(max_score_subwin_disp[0:3])
+                scale_choices[max_score_subwin_disp[3]] += 1
             # Put the computed latent values into a proper latent vector.
             latvec = np.empty([nb_features])
             offset = 0
@@ -144,7 +146,10 @@ def _best_matches(beta, pyramids, labels, args):
             assert offset == nb_features
             # Put the computed latent vector into the tensor.
             latents[j,i] = latvec
-    
+
+    print "Scales chosen for " + repr(max_dims)
+    print (scale_choices / np.sum(scale_choices))
+                
     return (latents, lat_cst)
 
 class BaseDPMClassifier:
@@ -181,6 +186,7 @@ class BaseDPMClassifier:
         # high energy subwindows as parts. Scale is the rounded
         # mean scale across all scales of feature pyramids.
         warp_max_dim = int(round(np.mean(self.max_dims)))
+        print "Warping max dimension: " + repr(warp_max_dim)
         warp = WarpClassifier(
             self.feature,
             warp_max_dim,
@@ -197,7 +203,10 @@ class BaseDPMClassifier:
 
         nb_classes = len(warpmaps)
         initdpms = []
-        self.partsize = int(np.min(self.max_dims))
+        # Choose the part size at half the mean scale, clamped to
+        # fit the minimum scale.
+        self.partsize = min(np.min(self.max_dims), int(round(np.mean(self.max_dims) / 2)))
+        print "Part size: " + repr(self.partsize)
         
         for i in range(nb_classes):
             initdpms.append(
