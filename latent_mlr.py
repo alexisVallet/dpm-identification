@@ -83,7 +83,7 @@ class BaseLatentMLR:
         for i in range(labels.size):
             assert labels[i] in range(self.nb_classes)
 
-        nb_samples = len(samples) if isinstance(samples, list) else self.nb_samples
+        nb_samples = len(samples) if self.nb_samples == None else self.nb_samples
         # Set and compile the theano gradient descent update function.
         # Tensor for latent vectors.
         lat = theano.shared(
@@ -131,8 +131,6 @@ class BaseLatentMLR:
             labels,
             self.latent_args
         )
-        print (lat_val.shape, [self.nb_classes, nb_samples, self.nb_features])
-        print (cst_val.shape, [self.nb_classes, nb_samples])
         assert lat_val.shape == (self.nb_classes, nb_samples, self.nb_features)
         assert cst_val.shape == (self.nb_classes, nb_samples)
         lat.set_value(lat_val)

@@ -99,7 +99,7 @@ def _best_matches(beta, pyramids, labels, args):
                     # Compute the subwindow and corresponding displacement.
                     (score, subwin, di, dj) = best_response_subwin(
                         response,
-                        fmaps[i],
+                        pyramids[s][i],
                         anchors,
                         dpms[j].deforms[k] if cst_deform == None else cst_deform,
                         partsize,
@@ -168,6 +168,7 @@ class BaseDPMClassifier:
         self.cst_deform = cst_deform
         self.use_pca = use_pca
         self.verbose = verbose
+        self.pca = None
 
     def train(self, samples, labels):
         """ Training procedure which takes precomputed feature maps as inputs.
@@ -250,53 +251,15 @@ class BaseDPMClassifier:
                 vectortodpm(self.lmlr.coef_[:,i], dpmsize)
             )
 
-    def test_fmaps(self, samples):
+    def test_pyramids(self, samples):
         nb_samples = len(samples)
-        if self.pca != None:
-            # Compute a data matrix without dimensionality reduction.
-            X = np.empty(
-                [nb_samples,
-                 self.nbrowfeat,
-                 self.nbcolfeat,
-                 self.feature.dimension],
-                dtype=theano.config.floatX
-            )
-            
-            for i in range(nb_samples):
-                X[i] = self.feature.compute_featmap(
-                    samples[i], self.nbrowfeat, self.nbcolfeat
-                )
-            # X is now a data matrix of feature maps, I want just a data mat
-            # of features to project.
-            X_feat = X.reshape(
-                [nb_samples * self.nbrowfeat * self.nbcolfeat, 
-                 self.feature.dimension]
-            )
-            # Project the features to the principal subspace.
-            X_feat_new = self.pca.transform(X_feat)
-            # Convert back to feature maps.
-            X_new = X_feat_new.reshape(
-                [nb_samples, self.nbrowfeat, self.nbcolfeat,
-                 self.pca.n_components]
-            )
-            # Convert it back to a feature maps representation.
-            fmaps = []
-            for i in range(nb_samples):
-                fmaps.append(X_new[i])
-            return fmaps
-        else:
-            fmaps = []
-            for sample in samples:
-                fmaps.append(self.feature.compute_featmap(
-                    sample, self.nbrowfeat, self.nbcolfeat
-                ))
-            return fmaps
+        return compute_pyramids(samples, self.max_dims, self.feature)
 
     def predict_proba(self, samples):
-        return self.lmlr.predict_proba(self.test_fmaps(samples))
+        return self.lmlr.predict_proba(self.test_pyramids(samples))
 
     def predict(self, samples):
-        return self.lmlr.predict(self.test_fmaps(samples))
+        return self.lmlr.predict(self.test_pyramids(samples))
 
 class DPMClassifier(BaseDPMClassifier, ClassifierMixin):
     pass
