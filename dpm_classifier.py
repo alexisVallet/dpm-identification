@@ -12,6 +12,7 @@ from latent_mlr import LatentMLR
 from features import max_energy_subwindow, warped_fmaps_simple, warped_fmaps_dimred, Combine, BGRHist, HoG, compute_pyramids
 from classifier import ClassifierMixin
 from dataset_transform import random_windows_fmaps
+from sklearn.cluster import KMeans
 
 def _init_dpm(warpmap, nbparts, partsize):
     """ Initializes a DPM by greedily taking high energy subwindows
@@ -182,44 +183,25 @@ class BaseDPMClassifier:
         # Make sure we recompile the matching function.
         global _batch_match
         _batch_match = None
-        # Initialize the model with a warping classifier, taking
-        # high energy subwindows as parts. Scale is the rounded
-        # mean scale across all scales of feature pyramids.
-        warp_max_dim = int(round(np.mean(self.max_dims)))
-        print "Warping max dimension: " + repr(warp_max_dim)
-        warp = WarpClassifier(
-            self.feature,
-            warp_max_dim,
-            C=self.C,
-            nb_iter=self.nb_gd_iter,
-            learning_rate=self.learning_rate,
-            inc_rate=self.inc_rate,
-            dec_rate=self.dec_rate,
-            use_pca=None,
-            verbose=self.verbose
-        )
-        warp.train(samples, labels)
-        warpmaps = warp.model_featmaps
-
-        nb_classes = len(warpmaps)
-        initdpms = []
+        # Unsupervised initialization of DPM.
         # Choose the part size at half the mean scale, clamped to
         # fit the minimum scale.
+        nb_classes = np.max(labels) + 1
         self.partsize = min(np.min(self.max_dims), int(round(np.mean(self.max_dims) / 2)))
-        print "Part size: " + repr(self.partsize)
-        
-        for i in range(nb_classes):
-            initdpms.append(
-                _init_dpm(
-                    warpmaps[i],
-                    self.nbparts,
-                    self.partsize
-                )
-            )
-
+        if self.verbose:
+            print "Computing feature pyramids..."
         # Prepare feature pyramids.
         pyramids = compute_pyramids(samples, self.max_dims, self.feature)
         nb_samples = len(samples)
+        if self.verbose:
+            print "Initializing DPMs with K-means..."
+        initdpms = kmeans_dpm_init(pyramids, labels, self.partsize, nb_classes,
+                                   10, self.nbparts)
+
+        if self.verbose:
+            print "DPMs:"
+            for dpm in initdpms:
+                print dpm
 
         # Train the DPMs using latent MLR
         dpmsize = initdpms[0].size() # All DPMs should have the same size.
@@ -272,3 +254,66 @@ class BaseDPMClassifier:
 
 class DPMClassifier(BaseDPMClassifier, ClassifierMixin):
     pass
+
+def kmeans_dpm_init(pyramids, labels, partsize, nb_classes, nb_patch_per_sample, nb_parts):
+    """ Initialized dpms by clustering randomly selected patches from
+        samples.
+    """    
+    dpms = []
+    nb_samples = len(pyramids[0])
+
+    for i in range(nb_classes):
+        pyramids_ = map(lambda pyrs: [pyrs[j] for j in range(nb_samples) if labels[j] == i],
+                        pyramids)
+        dpms.append(kmeans_dpm_helper(
+            pyramids_,
+            partsize,
+            nb_patch_per_sample,
+            nb_parts
+        ))
+    return dpms
+    
+def kmeans_dpm_helper(pyramids, partsize, nb_patch_per_sample, nb_parts):
+    nb_samples = len(pyramids[0])
+    featdim = pyramids[0][0].shape[2]
+    nb_scales = len(pyramids)
+    # Slap all the patches, plus normalized (i,j) positions, in
+    # a big data matrix.
+    X = np.empty(
+        [nb_samples * nb_patch_per_sample, partsize**2 * featdim + 2]
+    )
+
+    for k in range(nb_samples):
+        for p in range(nb_patch_per_sample):
+            # Pick a random scale.
+            s = np.random.randint(nb_scales)
+            # Pick random coordinates.
+            i = np.random.random()
+            j = np.random.random()
+            fmap = pyramids[s][k]
+            frows, fcols = fmap.shape[0:2]
+            i_actual = int(np.floor((frows - partsize) * i))
+            j_actual = int(np.floor((fcols - partsize) * j))
+            # Flatten the stuff into the matrix.
+            X[k*nb_patch_per_sample + p, 0:partsize**2 * featdim] = (
+                fmap[i_actual:i_actual+partsize,
+                     j_actual:j_actual+partsize].flatten('C')
+            )
+            X[k*nb_patch_per_sample + p, partsize**2 * featdim:] = np.array([i,j])
+    # Run K-means on it, then our centers are our parts.
+    km = KMeans(nb_parts)
+    km.fit(X)
+    parts = []
+    anchors = []
+    max_scale = np.argmax(map(lambda p: np.min(p[0].shape[0:2]), pyramids))
+    frows, fcols = pyramids[max_scale][0].shape[0:2]
+
+    for i in range(nb_parts):
+        center = km.cluster_centers_[i]
+        part = center[0:partsize**2 * featdim].reshape([partsize, partsize, featdim])
+        i, j = center[partsize**2 * featdim:]
+        anchor = np.array([int(np.floor((frows - partsize) * i)),
+                           int(np.floor((fcols - partsize) * j))])
+        parts.append(part)
+        anchors.append(anchor)
+    return DPM(parts, anchors, [])

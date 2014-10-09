@@ -122,7 +122,7 @@ class BaseLatentMLR:
         grad = T.grad(cost_sym, self.beta)
         grad_f = theano.function(
             [],
-            grad
+            (cost_sym, grad)
         )
         # Perform the first iteration "manually", to initialize prev_grad properly.
         lat_val, cst_val = self.latent_function(
@@ -135,7 +135,7 @@ class BaseLatentMLR:
         assert cst_val.shape == (self.nb_classes, nb_samples)
         lat.set_value(lat_val)
         lat_cst.set_value(cst_val)
-        init_grad = grad_f()
+        init_cost, init_grad = grad_f()
         self.beta.set_value(self.beta.get_value() - steps.get_value() 
                             * np.sign(init_grad))
         # Keep the gradient from the previous iteration into another shared theano
@@ -155,8 +155,10 @@ class BaseLatentMLR:
         )[sign_idx, T.arange(nb_weights)].reshape(weights_shape)
         # Specifies the updates at each iteration. We update the steps, the 
         # gradient from the previous iteration, and the actual descent.
+        # Update the steps, clamping between a minimum and a maxmium. Update the
+        # gradients with weight back tracking when the error
         updates = [
-            (steps, new_steps),
+            (steps, T.clip(new_steps, 10E-5, 0.1)),
             (prev_grad, grad),
             (self.beta, self.beta - steps * T.sgn(grad))
         ]
