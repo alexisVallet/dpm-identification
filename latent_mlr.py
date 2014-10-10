@@ -156,7 +156,7 @@ class BaseLatentMLR:
         # Specifies the updates at each iteration. We update the steps, the 
         # gradient from the previous iteration, and the actual descent.
         updates = [
-            (steps, new_steps),
+            (steps, T.clip(new_steps, 10E-5, 0.1)),
             (prev_grad, grad),
             (self.beta, self.beta - steps * T.sgn(grad))
         ]

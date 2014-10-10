@@ -159,7 +159,7 @@ class BaseDPMClassifier:
     def __init__(self, C=0.1, feature=Combine(BGRHist((4,4,4),0),HoG(9,1)), 
                  max_dims=[5,7,9,11], nbparts=4, deform_factor=1.,
                  nb_gd_iter=50, learning_rate=0.001,
-                 inc_rate=1.2, dec_rate=0.5, cst_deform=None, use_pca=None, 
+                 inc_rate=1.2, dec_rate=0.5, partsize=5, cst_deform=None, use_pca=None, 
                  verbose=False):
         self.C = C
         self.feature = feature
@@ -168,6 +168,7 @@ class BaseDPMClassifier:
         self.deform_factor = deform_factor
         self.inc_rate = inc_rate
         self.dec_rate = dec_rate
+        self.partsize = partsize
         self.nb_gd_iter = nb_gd_iter
         self.learning_rate = learning_rate
         self.cst_deform = cst_deform
@@ -205,7 +206,7 @@ class BaseDPMClassifier:
         initdpms = []
         # Choose the part size at half the mean scale, clamped to
         # fit the minimum scale.
-        self.partsize = min(np.min(self.max_dims), int(round(np.mean(self.max_dims) / 2)))
+        self.partsize = self.partsize
         print "Part size: " + repr(self.partsize)
         
         for i in range(nb_classes):

@@ -451,7 +451,7 @@ def block_normalization(cells, block_halfsize):
                 i:i + 2*block_halfsize+1,
                 j:j + 2*block_halfsize+1
             ].flatten('C')
-            block = block / np.sqrt(np.dot(block,block) + eps)
+            block = block / np.sqrt(np.dot(block.flatten(),block.flatten()) + eps)
             blocks[i,j] = block
     
     return blocks

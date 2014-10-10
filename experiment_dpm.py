@@ -9,11 +9,11 @@ outer_k = 5
 inner_k = 4
 args = {
     'feature': [Combine(HoG(9,1), BGRHist((4,4,4), 0))],
-    'mindimdiv': [10],
+    'max_dims': [5, 10, 15, 20],
     'nbparts': [2, 4, 6, 8],
     'C': [0.1],
     'learning_rate': [0.001],
-    'nb_gd_iter': [25, 50, 75, 100],
+    'nb_gd_iter': [75],
     'inc_rate': [1.2],
     'dec_rate': [0.5],
     'verbose': [True],
